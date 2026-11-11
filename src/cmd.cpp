@@ -13,7 +13,7 @@
 #include "picostation.h"
 #include "pseudo_atomics.h"
 #include "values.h"
-#include "directory_listing.h"
+#include "mh/hooks.h"
 
 #if DEBUG_CMD
 #define DEBUG_PRINT printf
@@ -22,18 +22,27 @@
 #endif
 extern picostation::I2S m_i2s;
 extern pseudoatomic<uint32_t> g_fileArg;
-extern pseudoatomic<picostation::FileListingStates> needFileCheckAction;
-extern pseudoatomic<int> listReadyState;
 
 static bool dir = 0;
 static bool trk_dir = 0;
 static bool prev_dir = 0;
 static bool sled_break = 0;
-static uint16_t m_jumpTrack = 0;
+static int s_patternValue = -1;  // setBootSectorPattern: last value seen
 
+// V3 wraps the upstream body (RAM 0x200000c0 jumps to FUN_1002f050): the latched word is read first, the body
+// runs, then the Multi House hook looks at the word.
 void __time_critical_func(picostation::MechCommand::processLatchedCommand)()
 {
-    static mech_cmd command;
+    const uint32_t raw = m_latched;
+    processLatched();
+    mh::hooks::on_mech_command(*this, raw);
+}
+
+picostation::MechCommand::mech_cmd picostation::MechCommand::s_command;
+
+void __time_critical_func(picostation::MechCommand::processLatched)()
+{
+    mech_cmd &command = s_command;
     command.raw = m_latched;
     m_latched = 0;
     
@@ -83,7 +92,7 @@ void __time_critical_func(picostation::MechCommand::processLatchedCommand)()
 	        switch(command.aseq_cmd.cmd)
 	        {
 	            case ASEQ_CMD_CANCEL:
-					setSens(SENS::XBUSY, false);
+					setSens(SENS::XBUSY, true);
 	            	m_i2s.i2s_set_state(1);
 					return;
 				
@@ -91,7 +100,7 @@ void __time_critical_func(picostation::MechCommand::processLatchedCommand)()
 					DEBUG_PRINT("ASEQ FOCUS ON\n");
 					setSens(SENS::FOK, true);
 					m_i2s.i2s_set_state(0);
-					setSens(SENS::XBUSY, true);
+					setSens(SENS::XBUSY, false);
 					add_alarm_in_ms(15, [](alarm_id_t id, void *user_data) -> int64_t 
 					{
 						picostation::MechCommand *mechCommand = static_cast<picostation::MechCommand *>(user_data);
@@ -164,7 +173,7 @@ void __time_critical_func(picostation::MechCommand::processLatchedCommand)()
 				case CLV_MODE_CLVA:
 					setSens(SENS::GFS, true);
 					m_i2s.i2s_set_state(1);
-					setSens(SENS::XBUSY, false);
+					setSens(SENS::XBUSY, true);
 					break;
 			}
 			break;
@@ -174,65 +183,10 @@ void __time_critical_func(picostation::MechCommand::processLatchedCommand)()
 		{
 			g_fileArg = command.custom_cmd.arg;
 
+			// V3 dropped the file browser commands (GOTO_*, GET_NEXT_CONTENTS, MOUNT_FILE, GET_COVER, GET_CFG): the
+			// card layer is driven through the 0xF9xxxx command seen by mh::hooks::on_mech_command.
 			switch (command.custom_cmd.cmd)
 			{
-				case COMMAND_NONE:
-				{
-					needFileCheckAction = FileListingStates::IDLE;
-					break;
-				}
-					
-				case COMMAND_GOTO_ROOT:
-				{
-					DEBUG_PRINT("GOTO_ROOT\n");
-					needFileCheckAction = FileListingStates::GOTO_ROOT;
-					listReadyState = 0;
-					break;
-				}
-					
-				case COMMAND_GOTO_PARENT:
-				{
-					DEBUG_PRINT("GOTO_PARENT\n");
-					needFileCheckAction = FileListingStates::GOTO_PARENT;
-					listReadyState = 0;
-					break;
-				}
-					
-				case COMMAND_GOTO_DIRECTORY:
-				{
-					DEBUG_PRINT("GOTO_DIRECTORY\n");
-					needFileCheckAction = FileListingStates::GOTO_DIRECTORY;
-					listReadyState = 0;
-					break;
-				}
-					
-				case COMMAND_GET_NEXT_CONTENTS:
-				{
-					DEBUG_PRINT("GET_NEXT_CONTENTS\n");
-					needFileCheckAction = FileListingStates::GET_NEXT_CONTENTS;
-					listReadyState = 0;
-					break;
-				}
-					
-				case COMMAND_MOUNT_FILE:
-				{
-					DEBUG_PRINT("MOUNT_FILE\n");
-					needFileCheckAction = FileListingStates::MOUNT_FILE;
-					break;
-				}
-					
-				case COMMAND_IO_COMMAND:
-				{
-					DEBUG_PRINT("COMMAND_IO_COMMAND %x\n", command.custom_cmd.arg);
-					break;
-				}
-					
-				case COMMAND_IO_DATA:
-				{
-					DEBUG_PRINT("COMMAND_IO_DATA %x\n", command.custom_cmd.arg);
-					break;
-				}
-				
 				case COMMAND_EXTENDED:
 				{
 					switch (command.custom_cmd.arg >> 1)
@@ -245,21 +199,9 @@ void __time_critical_func(picostation::MechCommand::processLatchedCommand)()
 							g_discImage.set_skip_edc(command.custom_cmd.arg & 1);
 							break;
 						
-						case EXTENDED_GET_CFG:
-							needFileCheckAction = FileListingStates::GET_CFG;
-							listReadyState = 0;
-							break;
-						
 						default:
 							break;
 					}
-					break;
-				}
-				
-				case COMMAND_GET_COVER:
-				{
-					needFileCheckAction = FileListingStates::GET_COVER;
-					listReadyState = 0;
 					break;
 				}
 				
@@ -292,10 +234,9 @@ void __time_critical_func(picostation::MechCommand::setBootSectorPattern) (uint8
 {
 	if (!isBootSectorPattern())
 	{
-		static int current_value = -1;
-		if (current_value != value || value == 10)
+		if (s_patternValue != value || value == 10)
 		{
-			current_value = value;
+			s_patternValue = value;
 			switch (value)
 			{
 			case 10:
@@ -341,6 +282,26 @@ void __time_critical_func(picostation::MechCommand::setSens)(const size_t what, 
     {
         gpio_put(Pin::SENS, new_value);
     }
+}
+
+// V3 FUN_20002f9a: back to the power-on state (members, then the file scope statics of this file).
+void picostation::MechCommand::resetState()
+{
+	m_jumpTrack = 0;
+	m_latched = 0;
+	m_bootSectorPattern = 0;
+	m_currentSens = 0;
+	static constexpr bool c_defaultSens[16] = {1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 1};
+	for (size_t i = 0; i < 16; i++)
+	{
+		m_sensData[i] = c_defaultSens[i];
+	}
+	m_soctEnabled = false;
+	sled_break = 0;
+	dir = 0;
+	prev_dir = 0;
+	s_patternValue = -1;
+	s_command.raw = 0;
 }
 
 bool picostation::MechCommand::getSoct() { return m_soctEnabled.Load(); }

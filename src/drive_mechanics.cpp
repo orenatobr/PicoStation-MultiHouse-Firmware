@@ -37,8 +37,7 @@ void __time_critical_func(picostation::DriveMechanics::moveToNextSector)()
 
 void __time_critical_func(picostation::DriveMechanics::setSector)(uint32_t step, bool rev)
 {
-	m_i2s.i2s_set_state(0);
-
+	// V3 patched out the upstream m_i2s.i2s_set_state(0) here: a seek no longer stops the I2S stream.
 	while(step != 0)
 	{
         if(rev == 0)

@@ -14,15 +14,13 @@
 #include "values.h"
 #include "global.h"
 #include "edc.h"
+#include "mh/hooks.h"
 
 #if DEBUG_CUE
 #define DEBUG_PRINT(...) printf(__VA_ARGS__)
 #else
 #define DEBUG_PRINT(...) while (0)
 #endif
-
-extern const uint8_t  loaderImage[];
-extern const uint32_t loaderImageSize;
 
 struct MSF
 {
@@ -134,14 +132,13 @@ void __time_critical_func(picostation::DiscImage::buildSector)(const int sector,
 	header[13] = toBCD(msf.ss);
 	header[14] = toBCD(msf.ff);
 	
+	// V3: submode 0x28 (Form | Data) for the first sub-header copy of every sector, the second copy only in the pre-gap.
 	if (pregap)
 	{
-		header[18] = header[22] = (Submode::Data);
+		header[22] = (Submode::Form | Submode::Data);
 	}
-	else
-	{
-		header[18] = (Submode::Form);
-	}
+
+	header[18] = (Submode::Form | Submode::Data);
 	
 	uint16_t *src = (uint16_t *) header;
 	
@@ -456,7 +453,14 @@ void __time_critical_func(picostation::DiscImage::unload)()
 	}    
 }
 
-void __time_critical_func(picostation::DiscImage::makeDummyCue)()
+// V3 replaces the body by a call to FUN_10030000 (RAM veneer 0x20000cdc): the Multi House layers mount the card
+// (or their built-in menu) into this object. The caller (I2S::start) acts on the result.
+bool __time_critical_func(picostation::DiscImage::makeDummyCue)()
+{
+    return mh::hooks::mount_default_disc(*this);
+}
+
+void __time_critical_func(picostation::DiscImage::buildPlaceholderCue)()
 {
     // Create a dummy cue disc with a single data track, as well as lead-in and lead-out tracks.
 
@@ -494,118 +498,66 @@ void __time_critical_func(picostation::DiscImage::makeDummyCue)()
 	c_sectorMax = 333000;  // 74:00:00
 }
 
+// V3 RAM 0x20000fa0: the RAM (menu image) location is gone and the SD path was inlined. Order of the tests:
+// location, pre-gap, card mode (tail call into the card layer), track walk of the cue image.
 void __time_critical_func(picostation::DiscImage::readSector)(void *buffer, const int sector, DataLocation location, const uint16_t *scramling)
 {
-    switch (location)
+    if (location == DataLocation::SDCard)
     {
-        case DataLocation::SDCard:
-            readSectorSD(buffer, sector, scramling);
-            break;
-        
-        case DataLocation::RAM:
-            readSectorRAM(buffer, sector, scramling);
-            break;
-        
-        default:
-            break;
-    }
-}
+        const int adjustedSector = sector - c_preGap;
+        size_t i = 1;
 
-void __time_critical_func(picostation::DiscImage::readSectorRAM)(void *buffer, const int sector, const uint16_t *scramling)
-{
-    const int adjustedSector = sector - c_preGap;
-    size_t targetOffset = adjustedSector * c_cdSamplesBytes;
-    
-    if (targetOffset >= 0 && targetOffset <= loaderImageSize - c_cdSamplesBytes)
-    {
-		scramble_data((uint32_t *) buffer, (uint16_t *) &loaderImage[targetOffset], scramling, 1176);
-    } 
-    else
-    {
-        buildSector(sector, static_cast<uint32_t *>(buffer), NULL, scramling, false);
-    }
-}
-
-void __time_critical_func(picostation::DiscImage::readSectorSD)(void *buffer, const int sector, const uint16_t *scramling)
-{
-	FRESULT fr;
-	UINT br = 0;
-	size_t i;
-
-	const int adjustedSector = sector - c_preGap;
-    
-    if (!skip_bootsector && adjustedSector >= 0 && adjustedSector < 5 && m_cueDisc.tracks[1].trackType == CueTrackType::TRACK_TYPE_DATA)
-	{
-		scramble_data((uint32_t *) buffer, (uint16_t *) &loaderImage[adjustedSector * 2352], scramling, 1176);
-		return;
-	}
-
-    if (adjustedSector < 0)
-	{
-		if (m_cueDisc.tracks[1].trackType == CueTrackType::TRACK_TYPE_DATA)
-		{
-			goto is_pregap;
-		}
-		else
-		{
-			memset(buffer, 0, 1176*4);
-			return;
-		}
-	}
-    
-    for (i = 1; i <= m_cueDisc.trackCount; i++)
-    {
-        if (adjustedSector < m_cueDisc.tracks[i + 1].indices[0])
+        if (adjustedSector < 0)
         {
-            if (m_cueDisc.tracks[i].file->opaque)
+            if (m_cueDisc.tracks[1].trackType != CueTrackType::TRACK_TYPE_DATA)
             {
-                const int64_t seekBytes = (adjustedSector - m_cueDisc.tracks[i].fileOffset) * c_cdSamplesBytes;
-                if (seekBytes >= 0)
+                memset(buffer, 0, 1176*4);
+                return;
+            }
+            goto is_pregap;
+        }
+
+        if (m_cardMode)
+        {
+            mh::hooks::card_read_sector(*this, buffer, sector, scramling);
+            return;
+        }
+
+        for (; i <= m_cueDisc.trackCount; i++)
+        {
+            if (adjustedSector < m_cueDisc.tracks[i + 1].indices[0])
+            {
+                // The first track whose end is past the sector owns it; without an open file it is served as pre-gap.
+                FIL *file = (FIL *)m_cueDisc.tracks[i].file->opaque;
+                if (!file)
                 {
-                    fr = f_lseek((FIL *)m_cueDisc.tracks[i].file->opaque, seekBytes);
-                    if (FR_OK != fr)
-                    {
-                        f_rewind((FIL *)m_cueDisc.tracks[i].file->opaque);
-                        DEBUG_PRINT("f_lseek error: (%d)\n", fr);
-                    }
+                    break;
                 }
 
-				if (skip_edc || m_cueDisc.tracks[i].trackType != CueTrackType::TRACK_TYPE_DATA)
-				{
-					fr = f_read_scramble((FIL *)m_cueDisc.tracks[i].file->opaque, buffer, c_cdSamplesBytes, &br, 
-										scramling, m_cueDisc.tracks[i].trackType == CueTrackType::TRACK_TYPE_DATA);
-					
-					if (FR_OK != fr)
-					{
-						DEBUG_PRINT("f_read error: (%d)\n",  fr);
-					}
-				}
-				else
-				{
-					fr = f_read((FIL *)m_cueDisc.tracks[i].file->opaque, s_userData, c_cdSamplesBytes, &br);
-					if (FR_OK != fr)
-					{
-						DEBUG_PRINT("f_read error: (%d)\n",  fr);
-					}
-					
-					eccedc_generate((uint8_t *) s_userData);
-					
-					scramble_data((uint32_t *) buffer, s_userData, scramling, c_cdSamplesBytes/2);
+                // V3 seeks unconditionally with a 32 bit product (the upstream sign test on the offset is gone).
+                if (FR_OK != f_lseek(file, (uint32_t)((adjustedSector - m_cueDisc.tracks[i].fileOffset) * c_cdSamplesBytes)))
+                {
+                    f_rewind(file);
                 }
-                break;
+
+                UINT br = 0;
+                const bool isData = m_cueDisc.tracks[i].trackType == CueTrackType::TRACK_TYPE_DATA;
+
+                if (skip_edc || !isData)
+                {
+                    f_read_scramble(file, buffer, c_cdSamplesBytes, &br, scramling, isData);
+                }
+                else
+                {
+                    f_read(file, s_userData, c_cdSamplesBytes, &br);
+                    eccedc_generate((uint8_t *) s_userData);
+                    scramble_data((uint32_t *) buffer, s_userData, scramling, c_cdSamplesBytes/2);
+                }
+                return;
             }
         }
-    }
-    
-    if (i > m_cueDisc.trackCount)
-	{
+
 is_pregap:
-		//DEBUG_PRINT("out of range image sec (%d)\n", adjustedSector);
-		buildSector(sector, static_cast<uint32_t *>(buffer), NULL, scramling, true);
-	}
-    else if (br < c_cdSamplesBytes)
-    {
-		DEBUG_PRINT("readed %llu of 2352\n", br);
+        buildSector(sector, static_cast<uint32_t *>(buffer), NULL, scramling, true);
     }
 }
-
