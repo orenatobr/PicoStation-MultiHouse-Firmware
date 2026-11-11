@@ -41,6 +41,12 @@ distributed here.
 * **Never run on hardware.** Nothing here was tested on a console, an RP2040 or a real SD card.
   The Pico can always be reflashed through BOOTSEL.
 
+## Deliberate deviations from the original
+
+* **Long names extension** (`docs/LONG_NAMES.md`): Case and Disc names up to 71 characters, stored in reserved bytes
+  (Case +0x3F, Disc +0x94..+0xFB). The original refuses such records (it requires those bytes to be zero), so a card
+  that uses the extension cannot be mounted by it. Cards without the extension list byte for byte as before.
+
 ## Known open risks
 
 See `docs/re/integration.md` section 4. The highest one: after a PS1 reset on a V2 card the raw base
