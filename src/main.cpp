@@ -8,12 +8,8 @@
 #include "pseudo_atomics.h"
 #include <cstdio>
 #include <csignal>
-#include <cstring>
 
 #include "disc_image.h"
-#include "hardware/i2c.h"
-#include "si5351.h"
-#include "picostation_pinout.h"
 
 uint32_t c_sectorMax = 333000;  // 74:00:00
 
@@ -36,37 +32,3 @@ int main() {
     picostation::core0Entry();  // Reset, playback speed, Sled, soct, subq
     __builtin_unreachable();
 }
-
-// Weak defaults of the Multi House hooks (include/mh/hooks.h): the upstream behaviour. The integration code
-// provides the strong definitions.
-namespace mh::hooks {
-
-__attribute__((weak)) bool mount_default_disc(picostation::DiscImage& disc) {
-    disc.buildPlaceholderCue();
-    return true;
-}
-
-__attribute__((weak)) void card_read_sector(picostation::DiscImage&, void* buffer, int, const uint16_t*) {
-    memset(buffer, 0, 1176 * 4);
-}
-
-__attribute__((weak)) void on_mech_command(picostation::MechCommand&, uint32_t) {}
-__attribute__((weak)) void on_door() {}
-__attribute__((weak)) void poll() {}
-__attribute__((weak)) void reset_card_state() {}
-__attribute__((weak)) void boot_trace() {}
-__attribute__((weak)) void boot_clock() {
-    // Upstream clock bring-up (I2C0 + computed Si5351 setup) when the table based sequence is not linked.
-    i2c_init(i2c0, 400 * 1000);
-    gpio_set_function(GPIO_EXP_I2C0_SDA, GPIO_FUNC_I2C);
-    gpio_set_function(GPIO_EXP_I2C0_SCL, GPIO_FUNC_I2C);
-    gpio_pull_up(GPIO_EXP_I2C0_SDA);
-    gpio_pull_up(GPIO_EXP_I2C0_SCL);
-    if (si5351_Init(0)) {
-        si5351_SetupCLK1(53203425, SI5351_DRIVE_STRENGTH_8MA);
-        si5351_SetupCLK2(53693175, SI5351_DRIVE_STRENGTH_8MA);
-        si5351_EnableOutputs((1 << 1) | (1 << 2));
-    }
-}
-
-}  // namespace mh::hooks
