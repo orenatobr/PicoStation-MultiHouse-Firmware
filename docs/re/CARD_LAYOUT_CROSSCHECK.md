@@ -1,3 +1,4 @@
+<!-- Copied from orenatobr/PicoStation-MultiHouse-macOS docs/FIRMWARE_CROSSCHECK.md. FUN_xxxxxxxx are Ghidra names of PicoStation_MH_V3.uf2 (flash address). -->
 # Firmware cross-check of the V2 card layout
 
 Second, independent oracle for `core/include/mh/v2format.h` and `docs/map/v2.md`: the layout the
