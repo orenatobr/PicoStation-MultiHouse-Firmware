@@ -1,0 +1,7 @@
+_ZN2mh7handler16read_sector_mainEmbPPKh	100228c8	2174	main handler incl. run_session_request, apply_*_request, build_* (inlined); FUN_100229f8 finish tail
+_ZN2mh7handler11read_sectorEmbPPKh	1002e100	1642	v6 cheat fast path; also contains hook_dead (FUN_1002d02c, 178) and hook_reject_session (FUN_1002f118, 102) inlined
+_ZN2mh7handler14on_pad_commandEm	100227cc	218	PS1 command decoder
+_ZN2mh7handler15build_disc_infoEm	10022518	96	PGM1 disc info; original success path lives in cave FUN_10029020 (384) for invalid serials
+_ZN2mh7handler18on_confirm_commandEm	1002f050	82	0xF9 arm
+_ZN2mh7handler14finish_confirmEv	1002f0b0	84	0xF9 judge
+_ZN2mh7handler19abort_cheat_requestEv	1002e0a0	64	drop PCR2 request
