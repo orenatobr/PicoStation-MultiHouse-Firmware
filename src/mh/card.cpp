@@ -48,13 +48,39 @@ bool header_valid() { return header_valid(block_buffer()); }
 // Case and Disc records
 // ---------------------------------------------------------------------------------------------
 
+namespace {
+bool printable_run(const uint8_t* p, uint32_t n) {
+    for (uint32_t i = 0; i != n; ++i) {
+        if (static_cast<uint32_t>(p[i]) - 0x20 > 0x5E) return false;
+    }
+    return true;
+}
+
+// A name field that continues in the long names extension: 31 printable characters, then NUL.
+bool full_base(const uint8_t* f) { return printable_run(f, 31) && f[31] == 0; }
+
+// One extension text: printable bytes up to its length, zero after.
+bool ext_text_ok(const uint8_t* e, uint32_t len) { return printable_run(e, len) && all_zero(e + len, 40 - len); }
+
+// Disc record +0x94..+0xFB under docs/LONG_NAMES.md. Without the magic the legacy rule (all zero) holds.
+bool disc_ext_valid(const uint8_t* r) {
+    const uint8_t* x = r + 0x94;
+    if (!equal(x, "LNX1", 4)) return all_zero(x, 0x68);
+    const uint32_t tl = x[4], cl = x[5];
+    if (tl > 40 || cl > 40 || (cl != 0 && r[7] != 0)) return false;
+    if (tl != 0 && !full_base(r + 0x1C)) return false;
+    return ext_text_ok(x + 6, tl) && ext_text_ok(x + 0x2E, cl) && all_zero(x + 0x56, 0x12);
+}
+}  // namespace
+
 // V3 FUN_10021960
 int validate_case(const uint8_t* r, uint32_t index, CaseInfo* out) {
     if (r[4] == 0) return all_zero(r, kCaseRecord) ? 0 : -1;
     if (!equal(r, kMagicCase, 4) || r[6] != index) return -1;
     const uint32_t n = r[5];
     if (n - 1 >= kMaxDiscsPerCase) return -1;
-    if (!all_zero(r + 0x3F, 0xD)) return -1;
+    if (r[0x3F] > 1 || !all_zero(r + 0x40, 0xC)) return -1;  // +0x3F: long names flag (original: must be zero)
+    if (r[0x3F] == 1 && !full_base(r + 8)) return -1;
     if (static_cast<uint16_t>(u16(r + 0x38) + 1) >= 0x101) return -1;
     if (crc32(r, 0x4C) != u32(r + 0x4C)) return -1;
     const uint8_t* ids = r + 0x3A;
@@ -73,6 +99,7 @@ int validate_case(const uint8_t* r, uint32_t index, CaseInfo* out) {
         out->art_id = u16(r + 0x38);
         copy(out->ids, ids, 5);
         copy_printable(out->name, 0x21, r + 8, 0x20);
+        out->long_name = r[0x3F];
     }
     return 1;
 }
@@ -104,7 +131,7 @@ int validate_disc(const uint8_t* r, uint32_t id, uint32_t first_pkg_lba, DiscInf
     if (extra_size > 0xA00) return -1;
     const uint32_t extra_lba = u32(r + 0x70);
     if (extra_lba == 0 ? extra_size != 0 : extra_lba != base + ext_off) return -1;
-    if (!all_zero(r + 0x94, 0x68)) return -1;
+    if (!disc_ext_valid(r)) return -1;
     const uint32_t rec_crc = crc32(r, 0xFC);
     if (rec_crc != u32(r + 0xFC)) return -1;
     if (out) {
@@ -427,6 +454,31 @@ void listing_trailer(uint32_t pos, uint8_t err, uint32_t count) {
     r[pos + 3] = static_cast<uint8_t>(count);
 }
 
+// base + extension (the base holds 31 characters when an extension follows, else up to 32 like before)
+void join_long(char* out, const char* base, const uint8_t* ext, uint32_t ext_len) {
+    uint32_t n = 0;
+    while (base[n] != 0 && n != (ext_len != 0 ? 31u : 32u)) {
+        out[n] = base[n];
+        ++n;
+    }
+    for (uint32_t i = 0; i != ext_len; ++i) out[n++] = static_cast<char>(ext[i]);
+    out[n] = 0;
+}
+
+// disc_by_id plus the long forms: `title` (kLongNameMax + 1 bytes) is the Disc title with title_ext, `case_name`
+// (same size, set to "" unless the record is a slot 0 record with case_ext) is `case_base` with case_ext.
+bool disc_long(uint32_t id, DiscInfo* di, char* title, const char* case_base, char* case_name) {
+    uint8_t rec[kDiscRecord];
+    case_name[0] = 0;
+    if (!read_bytes(state().disc_lba, id << 8, rec, kDiscRecord)) return false;
+    if (validate_disc(rec, id, state().art_size, di) != 1) return false;
+    const uint8_t* x = rec + 0x94;
+    const bool ext = equal(x, "LNX1", 4);
+    join_long(title, di->title, x + 6, ext ? x[4] : 0);
+    if (ext && x[5] != 0) join_long(case_name, case_base, x + 0x2E, x[5]);
+    return true;
+}
+
 // "<title> - DISCO <n>" cut at 0x47 characters, as built inline by FUN_100222e0
 uint32_t disc_entry_name(char* buf, const char* title, bool numbered, uint32_t number) {
     uint32_t len = 0;
@@ -463,6 +515,7 @@ void library_listing() {
     } else if (st.sel_case > 0xFF) {
         // every used Case, from the list_offset-th one on
         uint32_t used = 0, listed = 0;
+        bool lost = false;  // the Case group could not be read back after a long name lookup
         for (uint32_t grp = 0; used < st.case_count && read_blocks(grp * 5 + st.case_lba, 5);) {
             uint32_t idx = (grp & 7) << 5;
             const uint8_t* rec = block_buffer();
@@ -470,10 +523,26 @@ void library_listing() {
             for (uint32_t k = 0; k < 32 && used < st.case_count; ++k, rec += kCaseRecord) {
                 CaseInfo ci;
                 if (validate_case(rec, idx, &ci) == 1) {
+                    char lname[kLongNameMax + 1];
+                    const char* shown = ci.name[0] ? ci.name : "CASE PS1";
                     const uint32_t here = used;
                     used = (used + 1) & 0xFFFF;
                     if (here >= st.list_offset) {
-                        if (!listing_append(&pos, ci.name[0] ? ci.name : "CASE PS1", 1)) {
+                        if (ci.long_name != 0) {
+                            // The continuation lives in the Disc record ids[0]; any failure keeps the base name.
+                            // That read reuses the block buffer, so the Case group is read again afterwards.
+                            DiscInfo di;
+                            char title[kLongNameMax + 1];
+                            if (disc_long(ci.ids[0], &di, title, ci.name, lname) && di.case_index == ci.index &&
+                                di.slot == 0 && lname[0] != 0) {
+                                shown = lname;
+                            }
+                            if (!read_blocks(grp * 5 + st.case_lba, 5)) {
+                                lost = true;
+                                break;
+                            }
+                        }
+                        if (!listing_append(&pos, shown, 1)) {
                             err = 1;
                             break;
                         }
@@ -482,7 +551,7 @@ void library_listing() {
                 }
                 idx = (idx + 1) & 0xFF;
             }
-            if (grp == 7 || (++grp, err != 0)) break;
+            if (lost || grp == 7 || (++grp, err != 0)) break;
         }
         count = st.list_offset == 0 ? (st.case_count & 0xFFFF) : listed;
     } else {
@@ -491,9 +560,10 @@ void library_listing() {
             uint32_t listed = 0;
             for (uint32_t slot = st.list_offset & 0xFFFF; slot < ci.disc_count; slot = (slot + 1) & 0xFFFF) {
                 DiscInfo di;
-                if (!disc_by_id(ci.ids[slot], &di) || di.case_index != ci.index || di.slot != slot) continue;
+                char title[kLongNameMax + 1], unused[kLongNameMax + 1];
+                if (!disc_long(ci.ids[slot], &di, title, "", unused) || di.case_index != ci.index || di.slot != slot) continue;
                 char name[kListNameCap + 1];
-                disc_entry_name(name, di.title[0] ? di.title : "JOGO PS1", ci.disc_count != 1, slot + 1);
+                disc_entry_name(name, title[0] ? title : "JOGO PS1", ci.disc_count != 1, slot + 1);
                 if (!listing_append(&pos, name, 1)) {
                     err = 1;
                     break;

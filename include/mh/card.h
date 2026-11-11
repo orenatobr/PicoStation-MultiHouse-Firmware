@@ -32,6 +32,7 @@ constexpr uint32_t kDefaultDiscSectors = 0x385;  // the menu disc as seen by the
 constexpr uint32_t kRespSize = 0x914;         // response sector buffer bytes used by the library listing
 constexpr uint32_t kTextSize = 0x3000;        // response text buffer
 constexpr uint32_t kListNameCap = 0x47;       // longest "title - DISCO n" entry
+constexpr uint32_t kLongNameMax = 0x47;       // 31 base characters + 40 of the long names extension (docs/LONG_NAMES.md)
 constexpr uint32_t kFirstDataLba = 0x96;      // sector read stub: block = (lba - 0x96) * 5 from the raw base
 
 // Layout facts shared with the writer (fixed zone, 512 byte blocks)
@@ -61,8 +62,10 @@ struct CaseInfo {
     uint16_t art_id;                    // +0x02 0xFFFF none, else art slot (<= 0xFF)
     uint8_t ids[5];                     // +0x04 Disc ids, first disc_count distinct, rest 0
     char name[0x21];                    // +0x09 printable, at most 32 characters, NUL terminated
+    uint8_t long_name;                  // +0x2A long names extension: record byte +0x3F (1 = continued in case_ext of ids[0])
+    uint8_t pad2b;
 };
-static_assert(sizeof(CaseInfo) == 0x2A, "CaseInfo is 0x2a bytes");
+static_assert(sizeof(CaseInfo) == 0x2C, "CaseInfo is 0x2a bytes plus the long names flag (docs/LONG_NAMES.md)");
 
 // Output of the Disc validator FUN_10021d84 (0x64 bytes). The same layout lives at CardState::disc.
 struct DiscInfo {

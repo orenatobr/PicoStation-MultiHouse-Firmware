@@ -58,6 +58,16 @@ firmware does with them.
   `CASE INVALIDA` (selected Case unreadable), `CASE PS1` (empty Case name), `JOGO PS1` (empty Disc title). Disc entries get
   ` - DISCO n` (n = slot + 1) when the Case has more than one disc, cut at 0x47 characters. A Disc whose record is invalid or
   whose back references (case index, slot) do not match is skipped.
+* Long names (deliberate deviation, `docs/LONG_NAMES.md`): `validate_case` accepts byte +0x3F in {0,1} (1 needs a 31
+  character name field, +0x40..+0x4B stay zero) and `validate_disc` accepts the `LNX1` block at +0x94..+0xFB. The
+  listing builds Case rows as base + `case_ext` of the Disc `ids[0]` (re-reading the Case group afterwards, because the
+  Disc read reuses the block buffer; any failure keeps the 31 character base name) and Disc rows as title + `title_ext`,
+  then the ` - DISCO n` suffix, all cut at 0x47. The `0x60` cap in `listing_append` and `kRespSize` are enough for 71
+  character rows (entry = 2 + 71 bytes), but a page now holds 31 such rows instead of about 68; the `err = 1` paging
+  and the count rules are unchanged. `CaseInfo` grew by the flag (0x2C bytes), `DiscInfo` did not. The PGM1 page still
+  carries only the 31/32 character base title at +0x20 (same as the original); nothing else prints a name.
+  `case_ext_len > 0` against the Case name field cannot be checked in the Disc validator (the Case is another record):
+  the listing only uses `case_ext` when the Case flag is 1, whose validator requires the 31 character name.
 * PLS1 event record (state +0x188, 0x28 bytes): magic, version 1, length 0x28, sequence (wraps to 1, never 0), code, arg,
   flags (OR 4 on every post), `extra`, CRC-32 of the first 0x24 bytes; each post also clears the response cache. The code
   argument of FUN_1002189c is code 8 with `arg` = first parameter.
