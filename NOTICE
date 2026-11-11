@@ -1,0 +1,16 @@
+PicoStation Multi House firmware (reverse engineered source)
+
+This project builds on, and contains code from:
+
+  - megavolt85/PicoStation (Apache-2.0), commit c48754d, itself a C++ rewrite of
+    paulocode/picostation (Apache-2.0). Mechanics, SubQ, I2S/PIO, EDC/ECC, disc image
+    and cue handling in src/, include/ and pio/ originate there.
+  - alberonisse/PicoStation and the PicoStation Multi House project by Alberonisse
+    Moreira, whose V3 firmware (PicoStation_MH_V3.uf2, built Feb 5 2026) is the subject
+    of the reverse engineering in re/ and docs/.
+  - carlk3/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico (SD card driver) and ChaN FatFs (in
+    third_party/SD-fatfs), TSprech/RP2040_Pseudo_Atomic, grumpycoders/pcsx-redux
+    cueparser (Nicolas "Pixel" Noble), Raspberry Pi pico-sdk (BSD-3-Clause).
+
+Each third-party component keeps its own license file next to the code.
+This repository is unofficial and is not affiliated with the authors above.

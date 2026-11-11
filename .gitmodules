@@ -1,0 +1,9 @@
+[submodule "third_party/RP2040_Pseudo_Atomic"]
+	path = third_party/RP2040_Pseudo_Atomic
+	url = https://github.com/TSprech/RP2040_Pseudo_Atomic.git
+[submodule "tools/enterBootloader"]
+	path = tools/enterBootloader
+	url = https://github.com/johnbaumann/picostation_enterBootloader.git
+[submodule "third_party/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico"]
+	path = third_party/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico
+	url = https://github.com/carlk3/no-OS-FatFS-SD-SDIO-SPI-RPi-Pico.git

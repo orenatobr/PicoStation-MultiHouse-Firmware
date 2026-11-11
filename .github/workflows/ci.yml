@@ -1,0 +1,32 @@
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+      - name: Fetch pico-sdk 2.1.1
+        run: |
+          git clone --depth 1 --branch 2.1.1 https://github.com/raspberrypi/pico-sdk.git "$RUNNER_TEMP/pico-sdk"
+          git -C "$RUNNER_TEMP/pico-sdk" submodule update --init --depth 1 lib/tinyusb
+      - name: Host tests
+        run: |
+          if [ -f tests/Makefile ]; then make -C tests; fi
+      - name: Build firmware
+        env:
+          PICO_SDK_PATH: ${{ runner.temp }}/pico-sdk
+        run: |
+          cmake -S . -B build -G Ninja -DPICO_BOARD=pico -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          ls -l build/*.uf2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: picostation_pico1.uf2
+          path: build/picostation_pico1.uf2
