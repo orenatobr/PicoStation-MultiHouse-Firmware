@@ -14,3 +14,8 @@ This project builds on, and contains code from:
 
 Each third-party component keeps its own license file next to the code.
 This repository is unofficial and is not affiliated with the authors above.
+
+binary/picostation-menu.bin is the 29 sector (68,208 byte) built-in menu image taken unchanged from
+PicoStation_MH_V3.uf2 (flash offset 0x30190, SHA-256 bda6ddd1...0fc63). It is a PS1 program written
+by the Multi House authors and is shown when no valid card layout is found. It is included only so
+that the rebuilt firmware behaves like the original; it will be removed on request of its authors.

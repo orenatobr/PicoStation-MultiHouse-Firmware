@@ -30,19 +30,31 @@ def mnems(code):
 
 
 def load_elf(path):
+    """Return (symbols, body) for an executable or a relocatable object.
+
+    symbols: name -> (key, size); body(key, size) -> bytes. For ET_REL the key is
+    (section index, offset), for ET_EXEC it is the load address.
+    """
     elf = ELFFile(open(path, 'rb'))
+    rel = elf.header['e_type'] == 'ET_REL'
     secs = [(s['sh_addr'], s.data()) for s in elf.iter_sections()
             if s['sh_type'] == 'SHT_PROGBITS' and s['sh_flags'] & 2 and s['sh_size']]
     syms = {}
     for s in elf.get_section_by_name('.symtab').iter_symbols():
         if s['st_info']['type'] == 'STT_FUNC' and s['st_size']:
-            syms[s.name] = (s['st_value'] & ~1, s['st_size'])
+            if rel:
+                syms[s.name] = ((s['st_shndx'], s['st_value'] & ~1), s['st_size'])
+            else:
+                syms[s.name] = (s['st_value'] & ~1, s['st_size'])
 
-    def body(addr, size):
+    def body(key, size):
+        if rel:
+            idx, off = key
+            return elf.get_section(idx).data()[off:off + size]
         for sa, d in secs:
-            if sa <= addr < sa + len(d):
-                return d[addr - sa:addr - sa + size]
-        raise KeyError(hex(addr))
+            if sa <= key < sa + len(d):
+                return d[key - sa:key - sa + size]
+        raise KeyError(hex(key))
     return syms, body
 
 
