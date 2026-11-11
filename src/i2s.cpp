@@ -10,7 +10,6 @@
 #include <array>
 
 #include "cmd.h"
-#include "directory_listing.h"
 #include "disc_image.h"
 #include "drive_mechanics.h"
 #include "ff.h"
@@ -24,7 +23,7 @@
 #include "pseudo_atomics.h"
 #include "subq.h"
 #include "values.h"
-#include "listingBuilder.h"
+#include "mh/hooks.h"
 
 #if DEBUG_I2S
 #define DEBUG_PRINT printf
@@ -32,11 +31,13 @@
 #define DEBUG_PRINT(...) while (0)
 #endif
 
-pseudoatomic<picostation::FileListingStates> needFileCheckAction;
+// V3 still defines and initialises the three file browser globals of upstream, nothing reads them any more.
+pseudoatomic<int> needFileCheckAction;
 pseudoatomic<int> listReadyState;
 pseudoatomic<int> g_entryOffset;
 
-picostation::DiscImage::DataLocation s_dataLocation = picostation::DiscImage::DataLocation::RAM;
+// V3: the RAM menu location is gone, every sector comes from the mounted image (cue file or card).
+picostation::DiscImage::DataLocation s_dataLocation = picostation::DiscImage::DataLocation::SDCard;
 
 static uint16_t *__time_critical_func(generateScramblingLUT)()
 {
@@ -99,11 +100,11 @@ int __time_critical_func(picostation::I2S::initDMA)(const volatile void *read_ad
     static uint32_t loadedImageIndex = 0;
     static uint16_t img_count;
 
-    needFileCheckAction = picostation::FileListingStates::IDLE;
+    needFileCheckAction = 0;
     listReadyState = 1;
     g_entryOffset = 0;
     
-    menu_active = true;
+    menu_active = false;
     s_doorPending = false;
     
     reinitI2S();
@@ -118,16 +119,16 @@ int __time_critical_func(picostation::I2S::initDMA)(const volatile void *read_ad
 
     modChip.init();
 
-#if DEBUG_I2S
-    uint64_t startTime;
-    uint64_t endTime;
-#endif
-
-    g_discImage.makeDummyCue();
-	
-    // this need to be moved to diskimage
-    picostation::DirectoryListing::init();
-    picostation::DirectoryListing::getDirectoryEntries(0);
+    // V3 FUN_10030000: mounts the card (or its fallback menu); the single image counts as disc 0 of 1.
+    if (g_discImage.makeDummyCue())
+    {
+        loadedImageIndex = 0;
+        img_count = 1;
+        reinitI2S();
+        g_driveMechanics.resetDrive();
+        g_discImage.set_skip_bootsector(true);
+        mechCommand.resetBootSectorPattern();
+    }
 
     while (true)
     {
@@ -135,124 +136,21 @@ int __time_critical_func(picostation::I2S::initDMA)(const volatile void *read_ad
         currentSector = g_driveMechanics.getSector();
         
         modChip.sendLicenseString(currentSector, mechCommand);
-		
-		if (menu_active && needFileCheckAction.Load() != picostation::FileListingStates::IDLE)
-		{
-			switch (needFileCheckAction.Load())
-			{
-				case picostation::FileListingStates::GOTO_ROOT:
-				{
-					//printf("Processing GOTO_ROOT\n");
-					picostation::DirectoryListing::gotoRoot();
-					g_entryOffset = 0;
-					needFileCheckAction = picostation::FileListingStates::PROCESS_FILES;
-					break;
-				}
-				
-				case picostation::FileListingStates::GOTO_PARENT:
-				{
-					//printf("Processing GOTO_PARENT\n");
-					picostation::DirectoryListing::gotoParentDirectory();
-					g_entryOffset = 0;
-					needFileCheckAction = picostation::FileListingStates::PROCESS_FILES;
-					break;
-				}
-				
-				case picostation::FileListingStates::GOTO_DIRECTORY:
-				{
-					//printf("Processing GOTO_DIRECTORY %i\n", g_fileArg.Load());
-					picostation::DirectoryListing::gotoDirectory(g_fileArg.Load());
-					g_entryOffset = 0;
-					needFileCheckAction = picostation::FileListingStates::PROCESS_FILES;
-					break;
-				}
-				
-				case picostation::FileListingStates::GET_NEXT_CONTENTS:
-				{
-					//printf("Processing GET_NEXT_CONTENTS\n");
-					g_entryOffset = g_fileArg.Load();
-					needFileCheckAction = picostation::FileListingStates::PROCESS_FILES;
-					break;
-				}
-				
-				case picostation::FileListingStates::MOUNT_FILE:
-				{
-					//printf("Processing MOUNT_FILE\n");
-					s_dataLocation = picostation::DiscImage::DataLocation::SDCard;
-					char filePath[c_maxFilePathLength + 1];
-					loadedImageIndex = g_fileArg.Load();
-					picostation::DirectoryListing::getPath(loadedImageIndex, filePath);
-					//printf("image cue name:%s\n", filePath);
-					g_discImage.load(filePath);
-					needFileCheckAction = picostation::FileListingStates::IDLE;
-					img_count = DirectoryListing::getDirectoryEntriesCount();
-					menu_active = false;
-					reinitI2S();
-					g_driveMechanics.resetDrive();
-					g_discImage.set_skip_bootsector(false);
-					mechCommand.resetBootSectorPattern();
 
-					continue;
-					break;
-				}
-				
-				case picostation::FileListingStates::PROCESS_FILES:
-				{
-					if (!listReadyState.Load())
-					{
-						picostation::DirectoryListing::getDirectoryEntries(g_entryOffset.Load());
-						listReadyState = 1;
-					}
-					break;
-				}
-				
-				case picostation::FileListingStates::GET_COVER:
-				{
-					if (!listReadyState.Load())
-					{
-						picostation::DirectoryListing::openCover(g_fileArg.Load());
-						needFileCheckAction = picostation::FileListingStates::PROCESS_FILES;
-						listReadyState = 1;
-					}
-					break;
-				}
-				
-				case picostation::FileListingStates::GET_CFG:
-				{
-					if (!listReadyState.Load())
-					{
-						picostation::DirectoryListing::openCfg();
-						needFileCheckAction = picostation::FileListingStates::PROCESS_FILES;
-						listReadyState = 1;
-					}
-					break;
-				}
-				
-				default:
-					break;
-			}
-		}
-		else if (s_doorPending && !menu_active)
-		{
-			s_doorPending = false;
-			if (++loadedImageIndex > img_count)
-			{
-				loadedImageIndex = 0;
-			}
-			
-			char filePath[c_maxFilePathLength + 1];
-			picostation::DirectoryListing::getPath(loadedImageIndex, filePath);
-			g_discImage.unload();
-			g_discImage.load(filePath);
-			
-			reinitI2S();
-			g_driveMechanics.resetDrive();
-		}
+        // V3 stubs (RAM 0x20033100 / 0x2003311c): test and clear the door flag, rotate the legacy disc when it
+        // was set, then let the card layer finish a pending command.
+        const bool doorPending = s_doorPending.Load();
+        s_doorPending = false;
+        if (doorPending)
+        {
+            mh::hooks::on_door();
+        }
+        mh::hooks::poll();
 		
         // Data sent via DMA, load the next sector
         if (currentSector != lastSector && currentSector >= 4503 && currentSector < c_sectorMax)
         {
-			if (!menu_active)
+			if (!menu_active.Load())
 			{
 				for (int i = 0; i < CACHED_SECS; i++)
 				{
@@ -261,9 +159,6 @@ int __time_critical_func(picostation::I2S::initDMA)(const volatile void *read_ad
 						// already in cache
 						bufferForDMA = i;
 						lastSector = currentSector;
-#if DEBUG_I2S0
-						DEBUG_PRINT("sector %d in cache\n", currentSector);
-#endif
 						goto continue_transfer;
 					}
 				}
@@ -274,43 +169,8 @@ int __time_critical_func(picostation::I2S::initDMA)(const volatile void *read_ad
 				++bufferForSDRead &= (CACHED_SECS-1);
 			}
 			
-			if (menu_active && needFileCheckAction.Load() == picostation::FileListingStates::PROCESS_FILES && listReadyState.Load())
-			{
-				if (currentSector == 4750)
-				{
-					g_discImage.buildSector(currentSector - c_leadIn, pioSamples[bufferForSDRead], picostation::DirectoryListing::getFileListingData(), cdScramblingLUT);
-					needFileCheckAction = picostation::FileListingStates::IDLE;
-				}
-				else if (currentSector >= 4850 && currentSector < 4858)
-				{
-					g_discImage.buildSector(currentSector - c_leadIn, pioSamples[bufferForSDRead], picostation::DirectoryListing::readCover(currentSector-4850), cdScramblingLUT);
-				}
-				else if (currentSector == 4800)
-				{
-					g_discImage.buildSector(currentSector - c_leadIn, pioSamples[bufferForSDRead], picostation::DirectoryListing::readCfg(), cdScramblingLUT);
-				}
-				else
-				{
-					goto not_menu_request;
-				}
-			}
-			else
-			{
-not_menu_request:
-#if DEBUG_I2S
-				startTime = time_us_64();
-#endif
-				// Load the next sector
-				g_discImage.readSector(pioSamples[bufferForSDRead], currentSector - c_leadIn, s_dataLocation, cdScramblingLUT);
-#if DEBUG_I2S
-				endTime = time_us_64()-startTime;
-				
-				if (endTime > 5000)
-				{
-					DEBUG_PRINT("read time: %lluus (%d)\n", endTime, currentSector);
-				}
-#endif
-			}
+			// Load the next sector
+			g_discImage.readSector(pioSamples[bufferForSDRead], currentSector - c_leadIn, s_dataLocation, cdScramblingLUT);
 			
 			loadedSector[bufferForSDRead] = currentSector;
 			bufferForDMA = bufferForSDRead;

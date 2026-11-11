@@ -1,0 +1,26 @@
+_ZN11picostation11MechCommand21processLatchedCommandEv	1002f050	82	wrapper: V3 FUN_1002f050 (hook chain), the logging layer FUN_10024090 is aux_trace
+_ZN11picostation11MechCommand14processLatchedEv	200000c8	948	upstream body; first 8 bytes of the original are the veneer to FUN_1002f050
+_ZN11picostation11MechCommand20setBootSectorPatternEh	20000484	70
+_ZN11picostation11MechCommand7setSensEjb	200004e0	36
+_ZN11picostation11MechCommand10updateMechEv	20000504	84
+_ZN11picostation9DiscImage11buildSectorEiPmPtPKtb	20000588	542
+_ZN11picostation9DiscImage12generateSubQEi	200007c0	1202
+_ZN11picostation9DiscImage6unloadEv	20000f4c	82
+_ZN11picostation9DiscImage10readSectorEPviNS0_12DataLocationEPKt	20000fa0	268	V3 continues with the inline card read (0x20001018..0x2000105a) owned by the card layer
+_ZN11picostation14DriveMechanics16moveToNextSectorEv	2000112c	38
+_ZN11picostation14DriveMechanics9setSectorEmb	2000115c	510
+_ZN11picostation14DriveMechanics8moveSledERNS_11MechCommandE	20001374	82
+_ZN11picostation14DriveMechanics9startSledEv	200013c8	22
+ecc_generate	200013e0	360
+eccedc_init	2000156c	208
+eccedc_generate	20001650	414
+_ZN11picostation3I2S5startERNS_11MechCommandE	20001820	1168	capstone stops early (reports 1.00); objdump compare 0.43: first 250 instructions aligned, rest differs by the patch stubs
+_ZL12mech_irq_hndv	20001f98	16
+_ZL16interruptHandlerjm	20001fb0	258
+_ZL7initPWMPN11picostation11PWMSettingsE	200020d4	112
+_ZN11picostation6initHWEv	20002148	778
+_ZN11picostation5resetEv	200024c0	578
+_ZN11picostation11resetToMenuEv	20002760	538
+_ZN11picostation10core0EntryEv	200029dc	770	capstone over reports; objdump compare 0.82 (register allocation of the inlined updatePlaybackSpeed)
+_ZN11picostation4SubQ10start_subqEi	20002ce0	214
+_ZN11picostation7ModChip17sendLicenseStringEiRNS_11MechCommandE	10000440	402	V3 adds an aux_trace irq event at the end of the license strings

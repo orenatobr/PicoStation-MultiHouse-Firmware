@@ -18,8 +18,10 @@ class I2S {
   public:
     I2S() {};
     int dmaChannel;
-    bool menu_active;
-    bool s_doorPending;
+    // V3 made the three flags pseudoatomic (they are written from interrupt handlers and the card layer).
+    pseudoatomic<bool> menu_active;       // +4: always false in V3 (the RAM menu is gone); still gates the sector cache
+    pseudoatomic<bool> s_doorPending;     // +5: set by the door interrupt, consumed by the I2S loop
+    pseudoatomic<bool> s_resetPending;    // +6: card layer request, core 0 runs picostation::resetToMenu() for it
     
     void i2s_set_state(uint8_t state) { i2s_state = state; }
     int getSectorSending() { return m_sectorSending.Load(); }
@@ -47,4 +49,4 @@ class I2S {
 };
 }  // namespace picostation
 
-extern picostation::DiscImage::DataLocation s_dataLocation;
+extern picostation::DiscImage::DataLocation s_dataLocation;  // V3 starts with SDCard

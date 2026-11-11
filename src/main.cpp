@@ -3,10 +3,13 @@
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "edc.h"
+#include "mh/hooks.h"
 #include "picostation.h"
 #include "pseudo_atomics.h"
 #include <cstdio>
 #include <csignal>
+
+#include "disc_image.h"
 
 uint32_t c_sectorMax = 333000;  // 74:00:00
 
@@ -17,7 +20,11 @@ int main() {
     set_sys_clock_khz(271200, true);
 
     initPseudoAtomics();
+    // V3 main: FUN_10024564 (trace init, which chains to eccedc_init, then clears the command hook state),
+    // then FUN_100252dc (Si5351 table, then initHW) instead of the direct eccedc_init() / initHW() calls.
+    mh::hooks::boot_trace();
     eccedc_init();
+    mh::hooks::boot_clock();
 
     picostation::initHW();
     multicore_launch_core1(picostation::core1Entry);  // I2S Thread

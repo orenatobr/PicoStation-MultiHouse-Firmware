@@ -1,0 +1,8 @@
+_ZN2mh5hooks18mount_default_discERN11picostation9DiscImageE	10030000		mount chain FUN_10030000 + FUN_100273c4 glue
+_ZN2mh5hooks16card_read_sectorERN11picostation9DiscImageEPviPKt	10021640	152	sector stub (flash 10021640), chain and raw read inlined; serve_chain inlined
+_ZN2mh5hooks15on_mech_commandERN11picostation11MechCommandEm	1002f050	82	F9 hook; also the 10024090/10024588 chain
+_ZN2mh5hooks7on_doorEv	1002773c	228	legacy rotation (lambdas are the FUN_10021d50/FUN_10021d84 adapters)
+_ZN2mh5hooks4pollEv	1002f190		poll shim, finish_confirm is FUN_1002f0b0 (handler)
+_ZN2mh5hooks16reset_card_stateEv	20002f9a	88	card part of the runtime reset
+_ZN2mh5hooks10boot_traceEv	10024564		trace init and cfg state clear
+_ZN2mh5hooks10boot_clockEv	100252dc		Si5351 entry, I2C bring-up is hooks_pico.cpp

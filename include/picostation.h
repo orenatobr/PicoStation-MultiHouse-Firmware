@@ -54,5 +54,7 @@ extern unsigned int g_audioCtrlMode;
 void initHW();
 void updatePlaybackSpeed();
 void reset();
+void resetToMenu();        // V3 RAM 0x20002760: card layer request (I2S::s_resetPending), reloads the default disc
+void resetRuntimeState();  // V3 RAM 0x20002f9a: power-on state of MechCommand, cmd.cpp statics and the I2S flags
 }  // namespace picostation
 

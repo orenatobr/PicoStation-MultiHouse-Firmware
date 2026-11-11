@@ -1,0 +1,15 @@
+_ZN2mh3aux8cfg_loadERNS0_8CfgStateERKNS0_8CardViewERKNS0_11BlockReaderEPh	10024450	196	PSTCFG2 loader
+_ZN2mh3aux15cfg_music_serveERNS0_8CfgStateERKNS0_8CardViewERKNS0_11BlockReaderEmmPh	100245e0	496	config and music server (chunk plan inlined)
+_ZN2mh3aux16cfg_command_wordERNS0_8CfgStateEbm	10024588	62	command word hook, the tail call into FUN_100227cc is glue
+_ZN2mh3aux15legacy_v1_parseEPKhRNS0_8LegacyV1E	100273c4	724	header branch only; V2 mount call and RAM stub copy are glue
+_ZN2mh3aux16legacy_track_mapERKNS0_9DiscEntryERKNS0_11BlockReaderERNS0_9DiscTableE	100270a8	670	track map and table builder (toc_build inlined)
+_ZN2mh3aux14legacy_swap_v1ERKNS0_8LegacyV1EmRKNS0_11BlockReaderERNS0_9DiscTableE	1002773c	228	mode 1 branch only (mode 2 is legacy_swap_v2)
+_ZN2mh3aux16raw_header_parseEPKhRNS0_9DiscTableE	10018ff2	300	raw card branch of DiscImage::load; SD read and cue fallback are upstream
+_ZN2mh3aux14fallback_tableERNS0_9DiscTableE	10030000	118	table part; the mount chain (call FUN_100273c4) and state stores are glue
+_ZN2mh3aux16fallback_convertEPKhS2_Pm	100300b8	138	sector conversion loop
+_ZN2mh3aux17clock_wait_statusERKNS0_8ClockBusEh	10025094	98	status wait
+_ZN2mh3aux13clock_programERKNS0_8ClockBusE	10025108	364	register sequence only; I2C0 bring-up is pico glue
+_ZN2mh3aux11trace_flagsERKNS0_12TraceFlagsInE	10024000	60	
+_ZN2mh3aux10trace_initERNS0_10TraceBlockEm	10024044	50	chained init call is glue
+_ZN2mh3aux11trace_beginERNS0_10TraceBlockEmm	10024090	96	first half only
+_ZN2mh3aux15trace_irq_beginERNS0_10TraceBlockEmmmmm	10024188	108	first half only

@@ -25,12 +25,16 @@ class DiscImage {
     void unload();
     SubQ::Data generateSubQ(const int sector);
     bool hasData() { return m_hasData; };
-    void makeDummyCue();
+    // V3: mounts the default disc through mh::hooks::mount_default_disc; false when nothing could be set up.
+    bool makeDummyCue();
+    // Upstream makeDummyCue (single 74 minute data track), kept as the fallback of the weak mount hook.
+    void buildPlaceholderCue();
     void readSector(void *buffer, const int sector, DataLocation location, const uint16_t *scramling);
-    void readSectorRAM(void *buffer, const int sector, const uint16_t *scramling);
-    void readSectorSD(void *buffer, const int sector, const uint16_t *scramling);
     void set_skip_bootsector(bool skip) { skip_bootsector =  skip; }
 	void set_skip_edc(bool skip) { skip_edc =  skip; }
+    // V3 added a byte after the two skip flags (DiscImage +0x147A): non zero routes readSector to the card layer.
+    void set_card_mode(bool on) { m_cardMode = on; }
+    bool card_mode() const { return m_cardMode; }
 
   private:
     CueDisc m_cueDisc;
@@ -38,7 +42,11 @@ class DiscImage {
     int m_currentLogicalTrack = 0;
     bool skip_bootsector = false;
     bool skip_edc = false;
+    bool m_cardMode = false;
 };
 
 extern DiscImage g_discImage;
+
+// The Multi House state block and the card layer address the disc by raw offsets (CardDisc in mh/card.h).
+static_assert(sizeof(DiscImage) == 0x147C, "V3 DiscImage layout");
 }  // namespace picostation

@@ -16,6 +16,7 @@ class MechCommand {
     bool getSoct();
     void setSoct(const bool new_value);
     void processLatchedCommand();
+    void resetState();  // V3 FUN_20002f9a: power-on state of this object and of the cmd.cpp statics
     void updateMech();
     void resetXBUSY();
 	void setBootSectorPattern(const uint8_t value);
@@ -24,6 +25,7 @@ class MechCommand {
 	bool isBootSectorPattern() { return  (m_bootSectorPattern == 0b0111); }
 
   private:
+	void processLatched();  // upstream body of processLatchedCommand, wrapped by the Multi House hook
 	enum MECH_COMMAND
 	{
 		MECH_CMD_FOCUS_CONTROL = 0x0,
@@ -77,6 +79,7 @@ class MechCommand {
 	enum CUSTOM_CMD
 	{
 		COMMAND_NONE = 0x0,
+		// 0x1..0x7 and 0x9 were handled by the upstream file browser, V3 ignores them (0x9 is claimed by the card layer)
 		COMMAND_GOTO_ROOT = 0x1,
 		COMMAND_GOTO_PARENT = 0x2,
 		COMMAND_GOTO_DIRECTORY = 0x3,
@@ -198,6 +201,7 @@ class MechCommand {
         1   // $FX - 0
     };
     pseudoatomic<bool> m_soctEnabled;
+    static mech_cmd s_command;  // the command being processed (file scope static in V3, cleared by resetState)
 };
 }  // namespace picostation
 

@@ -5,10 +5,8 @@
 
 #include "cmd.h"
 #include "disc_image.h"
-#include "directory_listing.h"
 #include "drive_mechanics.h"
 #include "hardware/pwm.h"
-#include <hardware/i2c.h>
 #include "i2s.h"
 #include "logging.h"
 #include "main.pio.h"
@@ -17,7 +15,7 @@
 #include "pseudo_atomics.h"
 #include "subq.h"
 #include "values.h"
-#include "si5351.h"
+#include "mh/hooks.h"
 
 #if DEBUG_MAIN
 #define DEBUG_PRINT(...) printf(__VA_ARGS__)
@@ -51,7 +49,7 @@ static unsigned int s_mechachonOffset;
 unsigned int picostation::g_soctOffset;
 unsigned int picostation::g_subqOffset;
 
-static uint8_t s_resetPending = 0;
+static uint8_t s_resetPending = 0;  // 0 none, 1 short press, 2 long press (> 1 s)
 
 static picostation::PWMSettings pwmDataClock = 
 {
@@ -192,6 +190,12 @@ static void __time_critical_func(send_subq)(const int Sector)
 			reset();
 		}
 
+        // V3: the card layer asked for a return to the default disc
+        if (m_i2s.s_resetPending.Load())
+        {
+            resetToMenu();
+        }
+
         const int currentSector = g_driveMechanics.getSector();
 
         // Limit Switch
@@ -239,13 +243,9 @@ static void __time_critical_func(send_subq)(const int Sector)
 
 void __time_critical_func(picostation::initHW)()
 {
-#if DEBUG_LOGGING_ENABLED
-	stdio_init_all();
-    stdio_set_chars_available_callback(NULL, NULL);
+    // V3 was built with the debug logging block of upstream and its stdio calls patched out; the 1.25 s boot
+    // delay stayed.
     sleep_ms(1250);
-#endif
-
-    DEBUG_PRINT("Initializing...\n");
 
     mutex_init(&g_mechaconMutex);
 
@@ -256,6 +256,10 @@ void __time_critical_func(picostation::initHW)()
     
     gpio_put(Pin::SD_CS, 1);
     gpio_set_dir(Pin::SD_CS, GPIO_OUT);
+
+    gpio_init(Pin::LED);
+    gpio_put(Pin::LED, 1);
+    gpio_set_dir(Pin::LED, GPIO_OUT);
     
     gpio_set_dir(Pin::XLAT, GPIO_IN);
     gpio_set_dir(Pin::SQCK, GPIO_IN);
@@ -279,19 +283,7 @@ void __time_critical_func(picostation::initHW)()
     gpio_set_input_hysteresis_enabled(Pin::RESET, true);
     gpio_set_input_hysteresis_enabled(Pin::CMD_CK, true);
     
-    i2c_init(i2c0, 400*1000);
-	gpio_set_function(Pin::EXP_I2C0_SDA, GPIO_FUNC_I2C);
-	gpio_set_function(Pin::EXP_I2C0_SCL, GPIO_FUNC_I2C);
-	gpio_pull_up(Pin::EXP_I2C0_SDA);
-	gpio_pull_up(Pin::EXP_I2C0_SCL);
-	
-	// Initialize the Si5351
-	if (si5351_Init(0))
-	{
-		si5351_SetupCLK1(53203425, SI5351_DRIVE_STRENGTH_8MA);
-		si5351_SetupCLK2(53693175, SI5351_DRIVE_STRENGTH_8MA);
-		si5351_EnableOutputs((1<<1) | (1<<2));
-	}
+    // V3: the I2C0 / Si5351 bring-up is mh::hooks::boot_clock(), run by main() right before initHW().
 
     initPWM(&pwmMainClock);
     initPWM(&pwmDataClock);
@@ -347,7 +339,6 @@ void __time_critical_func(picostation::initHW)()
     g_coreReady[0] = false;
     g_coreReady[1] = false;
 
-    DEBUG_PRINT("ON!\n");
 }
 
 static void __time_critical_func(initPWM)(picostation::PWMSettings *settings)
@@ -382,9 +373,20 @@ void __time_critical_func(picostation::updatePlaybackSpeed)()
     }
 }
 
+// V3 FUN_20002f9a (called from the entry of reset() and from FUN_20002ff2 at its end).
+void __time_critical_func(picostation::resetRuntimeState)()
+{
+    m_mechCommand.resetState();
+    g_subqDelay = false;
+    m_i2s.s_doorPending = false;
+    m_i2s.s_resetPending = false;
+    m_i2s.i2s_set_state(0);
+    mh::hooks::reset_card_state();
+}
+
 void __time_critical_func(picostation::reset)()
 {
-    DEBUG_PRINT("RESET!\n");
+    resetRuntimeState();
     m_i2s.i2s_set_state(0);
     pio_sm_set_enabled(PIOInstance::SUBQ, SM::SUBQ, false);
     pio_sm_set_enabled(PIOInstance::SOCT, SM::SOCT, false);
@@ -397,26 +399,18 @@ void __time_critical_func(picostation::reset)()
     g_targetPlaybackSpeed = 1;
     updatePlaybackSpeed();
     
+    // V3: a long press only restores the boot sector handling, the card layer owns the disc change
     if (s_resetPending == 2)
     {
-        if (s_dataLocation != picostation::DiscImage::DataLocation::RAM)
-		{
-			g_discImage.unload();
-			g_discImage.makeDummyCue();
-			m_i2s.menu_active = true;
-			g_discImage.set_skip_bootsector(false);
-			g_discImage.set_skip_edc(false);
-            m_mechCommand.resetBootSectorPattern();
-		}
-		picostation::DirectoryListing::gotoRoot();
-		s_dataLocation = picostation::DiscImage::DataLocation::RAM;
+        g_discImage.set_skip_bootsector(true);
+        g_discImage.set_skip_edc(false);
+        m_mechCommand.resetBootSectorPattern();
     }
 
     mechacon_program_init(PIOInstance::MECHACON, SM::MECHACON, s_mechachonOffset, Pin::CMD_DATA);
     g_subqDelay = false;
     m_mechCommand.setSoct(false);
 
-    gpio_put(Pin::SCOR, 0);
     gpio_put(Pin::SQSO, 0);
 	g_driveMechanics.resetDrive();
 	m_i2s.reinitI2S();
@@ -441,9 +435,66 @@ void __time_critical_func(picostation::reset)()
 		}
 	}
 	
+    // V3 FUN_20002ff2
+    resetRuntimeState();
+    gpio_put(Pin::SENS, 1);
+
     pio_sm_set_enabled(PIOInstance::MECHACON, SM::MECHACON, true);
     
 	s_resetPending = 0;
 	gpio_set_irq_enabled(Pin::RESET, GPIO_IRQ_LEVEL_LOW, true);
 }
 
+// V3 RAM 0x20002760: same teardown as reset(), then the default disc is mounted again. It does not enable the
+// MECHACON state machine and does not touch the reset interrupt.
+void __time_critical_func(picostation::resetToMenu)()
+{
+    m_i2s.i2s_set_state(0);
+    pio_sm_set_enabled(PIOInstance::SUBQ, SM::SUBQ, false);
+    pio_sm_set_enabled(PIOInstance::SOCT, SM::SOCT, false);
+    pio_sm_restart(PIOInstance::MECHACON, SM::MECHACON);
+
+    pio_sm_clear_fifos(PIOInstance::MECHACON, SM::MECHACON);
+    pio_sm_clear_fifos(PIOInstance::SOCT, SM::SOCT);
+    pio_sm_clear_fifos(PIOInstance::SUBQ, SM::SUBQ);
+
+    g_targetPlaybackSpeed = 1;
+    updatePlaybackSpeed();
+
+    g_discImage.unload();
+    g_discImage.makeDummyCue();
+    g_discImage.set_skip_bootsector(true);
+    g_discImage.set_skip_edc(false);
+    m_mechCommand.resetBootSectorPattern();
+
+    mechacon_program_init(PIOInstance::MECHACON, SM::MECHACON, s_mechachonOffset, Pin::CMD_DATA);
+    g_subqDelay = false;
+    m_mechCommand.setSoct(false);
+
+    gpio_put(Pin::SQSO, 0);
+    g_driveMechanics.resetDrive();
+    m_i2s.reinitI2S();
+    g_discImage.set_skip_bootsector(false);
+    m_mechCommand.resetBootSectorPattern();
+
+    uint64_t startTime = time_us_64();
+
+    while ((time_us_64() - startTime) < 30000)
+    {
+        if (gpio_get(Pin::RESET) == 0)
+        {
+            startTime = time_us_64();
+        }
+    }
+
+    while ((time_us_64() - startTime) < 30000)
+    {
+        if (gpio_get(Pin::CMD_CK) == 0)
+        {
+            startTime = time_us_64();
+        }
+    }
+
+    s_resetPending = 0;
+    m_i2s.s_resetPending = false;
+}

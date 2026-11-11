@@ -7,11 +7,11 @@ The ledger file (re/ledger.tsv) has one function per line, tab separated:
 `v3_addr` is the address in the original image (flash 0x10xxxxxx or RAM 0x200000c0..).
 `v3_size` defaults to the symbol size of the rebuilt function.
 
-usage: ledger.py <elf> <v3.bin> <ledger.tsv> [--show SYMBOL] [--markdown OUT.md]
+usage: ledger.py <elf> <v3.bin> <ledger.tsv|ledger-dir> [--show SYMBOL] [--markdown OUT.md]
 Similarity is difflib's ratio over the instruction mnemonic sequence (operands ignored), so it
 tolerates register allocation and literal pool differences but not control flow differences.
 """
-import sys, difflib, argparse
+import os, sys, difflib, argparse
 from capstone import Cs, CS_ARCH_ARM, CS_MODE_THUMB
 from elftools.elf.elffile import ELFFile
 
@@ -66,7 +66,10 @@ def main():
     syms, body = load_elf(a.elf)
     img = open(a.v3, 'rb').read()
     rows = []
-    for line in open(a.ledger):
+    paths = ([os.path.join(a.ledger, f) for f in sorted(os.listdir(a.ledger)) if f.endswith('.tsv')]
+             if os.path.isdir(a.ledger) else [a.ledger])
+    lines = [ln for q in paths for ln in open(q)]
+    for line in lines:
         if not line.strip() or line.startswith('#'): continue
         f = (line.rstrip('\n').split('\t') + ['', '', ''])[:4]
         sym, addr, size, note = f

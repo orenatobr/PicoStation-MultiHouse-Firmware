@@ -103,6 +103,10 @@ target_sources(
     third_party/posix_file.c
 )
 
+# Multi House additions (card layer, command handler, ...): every file in src/mh is built.
+file(GLOB MH_SOURCES CONFIGURE_DEPENDS ${CMAKE_CURRENT_LIST_DIR}/src/mh/*.cpp ${CMAKE_CURRENT_LIST_DIR}/src/mh/*.c)
+target_sources(${PROJECT_NAME} PRIVATE ${MH_SOURCES})
+
 target_include_directories(
     ${PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}

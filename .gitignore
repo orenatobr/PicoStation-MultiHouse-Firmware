@@ -56,3 +56,6 @@ re/*.uf2
 re/*.tsv
 re/ghidra/out-*/
 third_party/pico-sdk/
+tests/test_*
+!tests/test_*.cpp
+tests/*.img
