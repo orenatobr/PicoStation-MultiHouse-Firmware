@@ -1,0 +1,52 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+env:
+  ARM_GNU_URL: https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi.tar.xz
+  ARM_GNU_SHA256: 62a63b981fe391a9cbad7ef51b17e49aeaa3e7b0d029b36ca1e9c3b2a9b78823
+  PICO_SDK_COMMIT: bddd20f928ce76142793bef434d4f75f4af6e433   # tag 2.1.1
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Arm GNU toolchain 14.2.Rel1 (pinned)
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/tc.tar.xz" "$ARM_GNU_URL"
+          echo "$ARM_GNU_SHA256  $RUNNER_TEMP/tc.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/tc" && tar -xf "$RUNNER_TEMP/tc.tar.xz" -C "$RUNNER_TEMP/tc" --strip-components=1
+          echo "$RUNNER_TEMP/tc/bin" >> "$GITHUB_PATH"
+      - name: pico-sdk 2.1.1 (pinned commit)
+        run: |
+          git clone --quiet https://github.com/raspberrypi/pico-sdk.git "$RUNNER_TEMP/pico-sdk"
+          git -C "$RUNNER_TEMP/pico-sdk" checkout --quiet "$PICO_SDK_COMMIT"
+          git -C "$RUNNER_TEMP/pico-sdk" submodule update --init --depth 1 lib/tinyusb
+      - name: Host tests
+        run: if ls tests/test_*.cpp >/dev/null 2>&1; then make -C tests; fi
+      - name: Build firmware
+        env:
+          PICO_SDK_PATH: ${{ runner.temp }}/pico-sdk
+        run: tools/build.sh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          mkdir -p out
+          cp build/picostation_pico1.uf2 "out/picostation-multihouse-${TAG}-pico1.uf2"
+          (cd out && sha256sum *.uf2 > SHA256SUMS && cat SHA256SUMS)
+          {
+            echo "Rebuilt PicoStation Multi House firmware ${TAG} (RP2040, \`picostation_pico1\`)."
+            echo
+            echo "Built from commit ${GITHUB_SHA} with Arm GNU Toolchain 14.2.Rel1 and pico-sdk 2.1.1 (${PICO_SDK_COMMIT})."
+            echo
+            echo "Unofficial reconstruction from the reverse engineering of PicoStation_MH_V3.uf2. Not tested on a console or a real SD card. See docs/RE_STATUS.md for what is reproduced."
+            echo
+            echo '```'; cat out/SHA256SUMS; echo '```'
+          } > out/NOTES.md
+          gh release create "$TAG" out/*.uf2 out/SHA256SUMS --title "$TAG" --notes-file out/NOTES.md --latest
