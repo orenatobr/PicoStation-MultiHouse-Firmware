@@ -3,29 +3,37 @@ on:
   pull_request:
   push:
     branches: [main]
+env:
+  ARM_GNU_URL: https://developer.arm.com/-/media/Files/downloads/gnu/14.2.rel1/binrel/arm-gnu-toolchain-14.2.rel1-x86_64-arm-none-eabi.tar.xz
+  ARM_GNU_SHA256: 62a63b981fe391a9cbad7ef51b17e49aeaa3e7b0d029b36ca1e9c3b2a9b78823
+  PICO_SDK_COMMIT: bddd20f928ce76142793bef434d4f75f4af6e433   # tag 2.1.1
 jobs:
   build-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install toolchain
+      - name: Install build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+      - name: Arm GNU toolchain 14.2.Rel1 (pinned)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build gcc-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
-      - name: Fetch pico-sdk 2.1.1
+          curl -fsSL -o "$RUNNER_TEMP/tc.tar.xz" "$ARM_GNU_URL"
+          echo "$ARM_GNU_SHA256  $RUNNER_TEMP/tc.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/tc" && tar -xf "$RUNNER_TEMP/tc.tar.xz" -C "$RUNNER_TEMP/tc" --strip-components=1
+          echo "$RUNNER_TEMP/tc/bin" >> "$GITHUB_PATH"
+      - name: pico-sdk 2.1.1 (pinned commit)
         run: |
-          git clone --depth 1 --branch 2.1.1 https://github.com/raspberrypi/pico-sdk.git "$RUNNER_TEMP/pico-sdk"
+          git clone --quiet https://github.com/raspberrypi/pico-sdk.git "$RUNNER_TEMP/pico-sdk"
+          git -C "$RUNNER_TEMP/pico-sdk" checkout --quiet "$PICO_SDK_COMMIT"
           git -C "$RUNNER_TEMP/pico-sdk" submodule update --init --depth 1 lib/tinyusb
       - name: Host tests
         run: |
-          if [ -f tests/Makefile ]; then make -C tests; fi
+          if ls tests/test_*.cpp >/dev/null 2>&1; then make -C tests; fi
       - name: Build firmware
         env:
           PICO_SDK_PATH: ${{ runner.temp }}/pico-sdk
         run: |
-          cmake -S . -B build -G Ninja -DPICO_BOARD=pico -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
-          ls -l build/*.uf2
+          tools/build.sh
+          sha256sum build/picostation_pico1.uf2
       - uses: actions/upload-artifact@v4
         with:
           name: picostation_pico1.uf2
