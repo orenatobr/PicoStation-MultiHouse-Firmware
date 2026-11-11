@@ -889,6 +889,250 @@ void test_sd_failures() {
     CHECK(mount_ok());
 }
 
+// ---------------------------------------------------------------------------------------------
+// Long names extension (docs/LONG_NAMES.md)
+// ---------------------------------------------------------------------------------------------
+// CRC of the whole listing buffer over every view of the mounted image
+uint32_t listing_digest() {
+    CardState& s = state();
+    uint32_t acc = 0xFFFFFFFFu;
+    const uint32_t views[][2] = {{0xFFFFFFFFu, 0}, {0xFFFFFFFFu, 1}, {0xFFFFFFFFu, 31}, {0, 0}, {1, 0},
+                                 {1, 1},           {2, 0},           {3, 0},            {4, 0}, {9, 0}};
+    for (const auto& v : views) {
+        s.sel_case = v[0];
+        s.list_offset = v[1];
+        library_listing();
+        acc = crc32_update(acc, response(), kRespSize);
+    }
+    return ~acc;
+}
+
+void test_legacy_listing_unchanged() {
+    // Golden values were taken with the firmware before the extension: cards without it list byte for byte as before.
+    use(make_image("basic"));
+    CHECK(mount_ok());
+    CHECK_EQ(listing_digest(), 0x884a5e1fu);
+    use(make_image("many"));
+    CHECK(mount_ok());
+    CHECK_EQ(listing_digest(), 0x3eb531bcu);
+}
+
+std::string entry_at(uint32_t n) {
+    uint32_t pos = 0;
+    std::string s;
+    for (uint32_t i = 0; i <= n; ++i) s = listing_entry(response(), &pos);
+    return s;
+}
+
+void test_long_names() {
+    const auto img = make_image("long");
+    const std::string c0 = std::string(31, 'N') + "(" + std::string(38, 'x') + ")";
+    const std::string d0 = std::string(31, 'D') + "(" + std::string(38, 'y') + ")";
+    const std::string c4 = "Metal Gear Solid - VR Missions (Europe) (En,Fr,De,Es,It) (Rev 1)";
+    auto fresh = [&] {
+        use(img);
+        CHECK(mount_ok());
+        state().sel_case = 0xFFFFFFFFu;
+        state().list_offset = 0;
+    };
+    auto discs = [&](uint32_t c) {
+        state().sel_case = c;
+        library_listing();
+    };
+    fresh();
+    library_listing();
+    CHECK_EQ(entry_at(0), c0);
+    CHECK_EQ(entry_at(1), std::string(40, 'L'));
+    CHECK_EQ(entry_at(2), std::string("Case Two"));
+    CHECK_EQ(entry_at(3), std::string("Four"));
+    CHECK_EQ(entry_at(4), c4);
+    CHECK_EQ(response()[0], 71);
+    CaseInfo ci;
+    CHECK(case_by_index(0, &ci));
+    CHECK_EQ(ci.long_name, 1);
+    CHECK_EQ(std::string(ci.name), c0.substr(0, 31));
+    CHECK(case_by_index(2, &ci));
+    CHECK_EQ(ci.long_name, 0);
+
+    // Disc rows: 32, 40 and 71 character titles, parentheses, region tags, multi disc suffix and its cut
+    discs(0);
+    CHECK_EQ(entry_at(0), d0);  // single disc: no suffix
+    discs(1);
+    CHECK_EQ(entry_at(0), std::string(32, 'E') + " - DISCO 1");
+    CHECK_EQ(entry_at(1), std::string(71, 'F'));  // 71 characters leave no room for the suffix
+    discs(2);
+    CHECK_EQ(entry_at(0), std::string(61, 'G') + " - DISCO 1");  // exactly 71
+    CHECK_EQ(entry_at(1), std::string(62, 'H') + " - DISCO ");   // cut inside the suffix, the digit is lost
+    CHECK_EQ(entry_at(1).size(), 71u);
+    discs(3);
+    CHECK_EQ(entry_at(0), std::string(40, 'T'));
+    discs(4);
+    CHECK_EQ(entry_at(0), std::string("Resident Evil 2 - Dual Shock Ver. (USA) (Disc 1) (Greatest Hits)"));
+    discs(1);
+    {
+        uint32_t pos = 0;
+        listing_entry(response(), &pos);
+        listing_entry(response(), &pos);
+        CHECK_EQ(response()[pos + 3], 2);  // count
+    }
+
+    // Case name fallback: ids[0] damaged, case_ext_len cleared, Case flag cleared, ids[0] of another Case
+    fresh();
+    *at(0x32, 0x9A) ^= 1;  // damaged CRC of Disc 0
+    library_listing();
+    CHECK_EQ(entry_at(0), c0.substr(0, 31));
+    CHECK_EQ(entry_at(1), std::string(40, 'L'));  // other Cases keep working
+    fresh();
+    *at(0x32, 0x99) = 0;  // case_ext_len 0 (title_ext stays), resealed
+    for (int i = 0; i < 40; ++i) *at(0x32, 0xC2 + i) = 0;
+    seal_disc(0);
+    library_listing();
+    CHECK_EQ(entry_at(0), c0.substr(0, 31));
+    fresh();
+    *at(10, 0x3F) = 0;  // Case flag 0: the base name only, the Disc record still valid
+    seal_case(0);
+    library_listing();
+    CHECK_EQ(entry_at(0), c0.substr(0, 31));
+    DiscInfo di;
+    CHECK(disc_by_id(0, &di));
+    fresh();
+    std::memset(at(0x32, 0), 0, 0x100);  // Disc 0 empty: not a record
+    library_listing();
+    CHECK_EQ(entry_at(0), c0.substr(0, 31));
+    fresh();
+    *at(10, 0x3A) = 3;  // ids[0] = Disc 3 (slot 0 of Case 2 has no case_ext): base name
+    seal_case(0);
+    library_listing();
+    CHECK_EQ(entry_at(0), c0.substr(0, 31));
+    // a damaged Disc row is left out, the others stay
+    fresh();
+    *at(0x32, 0x100 + 0x9A) ^= 1;
+    discs(1);
+    CHECK_EQ(entry_at(0), std::string(71, 'F'));
+
+    // ---- every rule of the spec -----------------------------------------------------------------
+    using Patch = std::vector<std::pair<uint32_t, int>>;
+    auto disc_patched = [&](uint32_t id, const Patch& p) {
+        fresh();
+        for (const auto& [off, v] : p) *at(0x32, id * 0x100 + off) = static_cast<uint8_t>(v);
+        seal_disc(id);
+        DiscInfo d;
+        return disc_by_id(id, &d);
+    };
+    auto disc_ok = [&](uint32_t id, uint32_t off, int v) { return disc_patched(id, {{off, v}}); };
+    auto case_ok = [&](uint32_t idx, uint32_t off, int v, bool seal = true) {
+        fresh();
+        *at(10, idx * 0x50 + off) = static_cast<uint8_t>(v);
+        if (seal) seal_case(idx);
+        CaseInfo c;
+        return case_by_index(idx, &c);
+    };
+    CHECK(disc_patched(0, {}));  // unmodified records are valid
+    CHECK(disc_patched(6, {}));
+    CHECK(case_ok(0, 0x3F, 1));
+    for (uint32_t i = 0; i < 4; ++i) CHECK(!disc_ok(0, 0x94 + i, 0x41 ^ (i * 3)));  // bad magic bytes
+    CHECK(!disc_ok(0, 0x94, 0));                                                    // magic gone, rest not zero
+    CHECK(!disc_ok(0, 0x98, 41));                                                   // title_ext_len > 40
+    CHECK(!disc_ok(0, 0x99, 41));                                                   // case_ext_len > 40
+    CHECK(!disc_ok(0, 0x98, 255));
+    CHECK(disc_ok(5, 0x98, 9));                                                     // unchanged length is fine
+    CHECK(!disc_ok(5, 0x98, 8));                                                    // shorter: byte 8 is no longer zero after len
+    CHECK(!disc_ok(5, 0x98, 10));                                                   // longer: a NUL inside the declared length
+    CHECK(!disc_ok(5, 0x9A + 9, 'x'));                                              // nonzero byte after title_ext_len
+    CHECK(!disc_ok(5, 0x9A + 39, 1));
+    CHECK(!disc_ok(6, 0xC2 + 33, 'x'));                                             // nonzero byte after case_ext_len
+    CHECK(!disc_ok(5, 0x9A, 0x1F));                                                 // nonprintable in title_ext
+    CHECK(!disc_ok(5, 0x9A, 0x7F));
+    CHECK(!disc_ok(5, 0x9A, 0x80));
+    CHECK(!disc_ok(5, 0x9A, 0));                                                    // NUL inside the declared length
+    CHECK(!disc_ok(6, 0xC2, 0x1F));                                                 // nonprintable in case_ext
+    CHECK(!disc_ok(6, 0xC2, 0x7F));
+    CHECK(!disc_ok(0, 0xC2 + 39, 0));                                               // NUL inside case_ext
+    CHECK(disc_ok(5, 0x9A, 0x20));                                                  // 0x20 and 0x7E are printable
+    CHECK(disc_ok(5, 0x9A, 0x7E));
+    CHECK(!disc_patched(2, {{0x99, 1}, {0xC2, 'x'}}));                              // case_ext_len on slot 1 (Disc 2 is slot 1 of Case 1)
+    CHECK(!disc_patched(4, {{0x99, 1}, {0xC2, 'x'}}));
+
+    for (uint32_t off : {0xEAu, 0xF0u, 0xFBu}) CHECK(!disc_ok(0, off, 1));          // the 18 reserved bytes
+    // base field of a title that has title_ext: exactly 31 printable characters, then NUL
+    CHECK(!disc_ok(0, 0x1C + 30, 0));       // 30 characters
+    CHECK(!disc_ok(0, 0x1C + 31, 'Z'));     // 32 characters
+    CHECK(!disc_ok(0, 0x1C + 5, 0x01));     // nonprintable inside the base
+    CHECK(!disc_ok(5, 0x1C + 10, 0));
+    // title_ext_len 0 does not constrain the title field
+    // Case flag
+    CHECK(!case_ok(0, 0x3F, 2));
+    CHECK(!case_ok(0, 0x3F, 0xFF));
+    for (uint32_t off = 0x40; off <= 0x4B; ++off) CHECK(!case_ok(0, off, 1));
+    CHECK(!case_ok(0, 8 + 30, 0));          // flag 1 with a 30 character name
+    CHECK(!case_ok(0, 8 + 31, 'Z'));        // flag 1 with a 32 character name
+    CHECK(!case_ok(0, 8 + 3, 0x01));
+    CHECK(!case_ok(2, 0x3F, 1));            // flag 1 on the short name "Case Two"
+    CHECK(case_ok(2, 0x3F, 0));
+    {
+        fresh();
+        *at(10, 0x3F) ^= 0x01;  // damaged CRC, not resealed
+        CaseInfo c;
+        CHECK(!case_by_index(0, &c));
+        fresh();
+        *at(0x32, 0xA0) ^= 0x01;
+        DiscInfo d;
+        CHECK(!disc_by_id(0, &d));
+    }
+    // a card without the extension: magic with both lengths 0 is valid, a short title cannot carry title_ext,
+    // and without the magic any nonzero byte in the area keeps the old rejection
+    use(make_image("basic"));
+    CHECK(mount_ok());
+    uint8_t rec[0x100];
+    std::memcpy(rec, at(0x32, 0), 0x100);  // "Alundra 2"
+    CHECK_EQ(validate_disc(rec, 0, state().art_size, nullptr), 1);
+    std::memcpy(rec + 0x94, "LNX1", 4);
+    put32(rec + 0xFC, crc32(rec, 0xFC));
+    CHECK_EQ(validate_disc(rec, 0, state().art_size, nullptr), 1);
+    rec[0x98] = 1;
+    rec[0x9A] = 'a';
+    put32(rec + 0xFC, crc32(rec, 0xFC));
+    CHECK_EQ(validate_disc(rec, 0, state().art_size, nullptr), -1);
+    std::memcpy(rec, at(0x32, 0), 0x100);
+    rec[0x96] = 1;
+    put32(rec + 0xFC, crc32(rec, 0xFC));
+    CHECK_EQ(validate_disc(rec, 0, state().art_size, nullptr), -1);
+}
+
+void test_long_paging() {
+    use(make_image("manylong"));
+    CHECK(mount_ok());
+    CardState& s = state();
+    s.sel_case = 0xFFFFFFFFu;
+    s.list_offset = 0;
+    library_listing();
+    // 73 byte entries: entry k starts at 73 * k and needs start + 6 + 71 <= 0x914, so 31 fit
+    uint32_t pos = 0;
+    uint32_t n = 0;
+    while (response()[pos] != 0) {
+        CHECK_EQ(response()[pos], 71);
+        ++n;
+        pos += 73;
+    }
+    CHECK_EQ(n, 31u);
+    CHECK_EQ(pos, 31u * 73);
+    CHECK_EQ(response()[pos + 1], 1);                                       // err: another page follows
+    CHECK_EQ(response()[pos + 2] * 256 + response()[pos + 3], 40);          // first page reports the total
+    CHECK(pos + 4 <= kRespSize);
+    s.list_offset = n;
+    library_listing();
+    pos = 0;
+    uint32_t m = 0;
+    while (response()[pos] != 0) {
+        ++m;
+        pos += 73;
+    }
+    CHECK_EQ(m, 9u);
+    CHECK_EQ(response()[pos + 1], 0);
+    CHECK_EQ(response()[pos + 2] * 256 + response()[pos + 3], 9);           // later pages report what they carry
+    CHECK_EQ(entry_at(0), (std::string("Long Case ") + "31" + " ").append(71 - 13, 'z'));
+}
+
 }  // namespace
 
 int main() {
@@ -902,6 +1146,9 @@ int main() {
     test_track_map();
     test_listing();
     test_legacy();
+    test_legacy_listing_unchanged();
+    test_long_names();
+    test_long_paging();
     test_stub_and_events();
     test_sd_failures();
     TEST_MAIN_END();
