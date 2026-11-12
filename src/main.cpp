@@ -2,6 +2,7 @@
 #include "hardware/vreg.h"
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
+#include "pico/unique_id.h"
 #include "edc.h"
 #include "mh/hooks.h"
 #include "picostation.h"
@@ -13,7 +14,11 @@
 
 uint32_t c_sectorMax = 333000;  // 74:00:00
 
+// The original V3 reads the flash unique ID first thing in main (found by comparing the boot of both images in an emulator).
+static pico_unique_board_id_t g_boardId;
+
 int main() {
+    pico_get_unique_board_id(&g_boardId);
     vreg_set_voltage(VREG_VOLTAGE_1_15);  // Increase the VREG voltage to 1.15V for the faster clock speed
     sleep_ms(100); // Wait for the voltage to stabilize
 
