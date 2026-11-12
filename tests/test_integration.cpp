@@ -145,6 +145,34 @@ void pad(uint32_t sub, uint32_t arg) { hooks::on_mech_command(mech(), 0xF00000 |
 
 std::string tag(const Capture& c) { return std::string(reinterpret_cast<const char*>(c.user.data()), 4); }
 
+Bytes slice_file(const char* path, size_t off, size_t len) {
+    Bytes all = file(path);
+    if (all.size() < off + len) return {};
+    return Bytes(all.begin() + off, all.begin() + off + len);
+}
+
+// Menu overlay end to end (needs MH_MENU_ORIG / MH_MENU_PATCHED, the Manager blobs before and after the patch).
+void test_menu_overlay() {
+    const char* o = std::getenv("MH_MENU_ORIG");
+    const char* p = std::getenv("MH_MENU_PATCHED");
+    if (!o || !p) return;
+    Bytes img = gen_card("menu93");
+    const size_t base = static_cast<size_t>(card::kMenuLba) * 512;
+    for (uint32_t k : {32u, 33u, 54u}) {
+        const Bytes orig = slice_file(o, k * 2352u, 2352);
+        CHECK_EQ(orig.size(), 2352u);
+        std::memcpy(&img[base + static_cast<size_t>(k) * 5 * 512], orig.data(), 2352);
+    }
+    mount(img);
+    CHECK_EQ(st().menu_sectors, 93u);
+    const Bytes want33 = slice_file(p, 33u * 2352u, 2352);
+    const Bytes want54 = slice_file(p, 54u * 2352u, 2352);
+    const Bytes orig32 = slice_file(o, 32u * 2352u, 2352);
+    CHECK(read(0x96 + 33).scrambled_src == Bytes(want33.begin(), want33.begin() + 0x930));
+    CHECK(read(0x96 + 54).scrambled_src == Bytes(want54.begin(), want54.begin() + 0x930));
+    CHECK(read(0x96 + 32).scrambled_src == Bytes(orig32.begin(), orig32.begin() + 0x930));  // unchanged sector
+}
+
 // ---- scenarios ------------------------------------------------------------------------------------
 void test_v2_menu() {
     Bytes img = gen_card("basic");
@@ -363,6 +391,7 @@ int main() {
     bind();
     test_boot();
     test_v2_menu();
+    test_menu_overlay();
     test_unreadable_sector();
     test_fallback();
     test_legacy_single();

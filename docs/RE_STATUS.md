@@ -25,6 +25,7 @@ distributed here.
 | Config, music, legacy, fallback, clock, trace | `src/mh/aux_*.cpp` | `docs/re/aux.md`, `docs/re/function-map.md` |
 | Wiring into the firmware | `src/mh/hooks_*.cpp`, `include/mh/hooks*.h` | `docs/re/integration.md` |
 | Built-in menu image | `binary/picostation-menu.bin` | copied bytes, see NOTICE |
+| Menu sector overlay (new in 0.3.0, not in V3) | `src/mh/menu_overlay*.cpp`, `tools/gen_menu_overlay.py` | `docs/MEMCARD_FAVORITES.md` |
 
 ## How faithful it is (read this before flashing)
 

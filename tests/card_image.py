@@ -236,6 +236,6 @@ if __name__ == "__main__":
     manylong = [((b"Long Case %02d " % i).ljust(71, b"z"), [(b"SLUS-%05d" % i, b"Title %02d" % i, 1, [(0, 0, 1, 2)])])
                 for i in range(40)]
     data = {"basic": build_v2, "legacy": build_legacy, "empty": lambda: build_v2([], menu_sectors=1),
-            "many": lambda: build_v2(many), "long": lambda: build_v2(longs, long_names=True),
+            "many": lambda: build_v2(many), "menu93": lambda: build_v2(menu_sectors=93), "long": lambda: build_v2(longs, long_names=True),
             "manylong": lambda: build_v2(manylong, long_names=True)}[kind]()
     open(out, "wb").write(data)
