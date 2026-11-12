@@ -28,6 +28,10 @@ include(pico_sdk_import.cmake)
 
 project(${PROJECT_NAME})
 
+# The original V3 boot2 uses a flash clock divider of 4 (67.8 MHz at the 271.2 MHz system clock); the SDK default of 2
+# would run the flash at 135.6 MHz, past the rating of many W25Q chips.
+add_compile_definitions(PICO_FLASH_SPI_CLKDIV=4)
+
 pico_sdk_init()
 
 set(CMAKE_BUILD_TYPE Release)
