@@ -107,13 +107,23 @@ Workarounds that need no change in the menu:
 
 **Update (Manager 0.5.4): the menu change was made.** The embedded menu now sends its own Game ID (`SCES-31337`, from its
 boot file `SCES_313.37`) to every slot that answers `81 20` with `27 FF`, before the first card detection of the save and load
-state machine, waits about 0.8 s for the device to switch card and continues into the original detection. A 564 byte routine
+state machine, waits about 1.5 s (Manager 0.5.5, was 0.8 s) for the device to switch card and continues into the original detection. A 564 byte routine
 replaces an unreferenced CD-ROM helper of the menu (`0x800d42e8`) and one `jal` (`0x800d8db0`) is redirected to it; the code is
 `tools/menu_gameid_asm.py` in the Manager repository. It was validated by running the real menu code against a model of
 the device family in an emulator (virtual card per id, reconnect window, no ACK for the id): without the routine the device
 stays on the last game's card and the favorites are not read, with it the device ends on `SCES-31337` and the favorites are read;
 an original card receives no id. Settings saved earlier on a game's card must be saved once again. Not verified on the
-BitFunx itself, and how it treats an id it has never seen is unknown. The firmware UF2 is unchanged by this.
+BitFunx itself. The firmware UF2 is unchanged by this.
+
+**What the SD2PSX source says** (ogg1e/Sd2psx-firmware, `ps1_odeman.c`, `ps1_cardman.c`; the BitFunx firmware may differ): a Game ID
+(`81 21 00 <len> <id>`) makes the device close the card, wait 250 ms, open or create the `.mcd` and load it from the SD card.
+An id found in its game database selects a card of its own; any other id selects the numbered card `Card1`, channel 1. So
+`SCES-31337` should land on the ordinary default card, which is stable. That is why the wait was raised to 1.5 s: loading
+128 KB from a slow SD card can take longer than the 250 ms delay.
+
+**Why this is not a firmware change:** the menu shown at boot is the program written to the SD card by the Manager. The
+firmware only holds a small emergency menu (shown when the SD card is missing or invalid) that has no favorites and no
+Memory Card code, and the Pico has no access to the Memory Card port.
 
 ## What is needed to go further
 
