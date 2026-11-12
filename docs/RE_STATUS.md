@@ -39,8 +39,13 @@ distributed here.
 * **Not reproduced:** the exact RAM addresses, the patched call chain order of the original (the hook
   order is simplified), the trace flags, one reset path (see risks), the USB stdio descriptors
   (the original links TinyUSB but never starts it, so the rebuilt image is about 75 KB smaller).
-* **Never run on hardware.** Nothing here was tested on a console, an RP2040 or a real SD card.
-  The Pico can always be reflashed through BOOTSEL.
+* **Does not boot on the one console it was tried on.** v0.3.0 and v0.3.1 were flashed on a PS1 with a PicoStation
+  board: the console went straight to the Memory Card screen (no drive detected). Found and fixed so far: the QSPI
+  flash divider was 2 instead of 4 (boot2 now identical to the original). Still open, found by emulating the boot of
+  both images (peripheral writes are identical through the clock setup, then the emulation stops because PIO, DMA and
+  the second core are not modelled): the original reads the flash unique ID early in boot, which this build does not.
+  The Pico can always be reflashed through BOOTSEL with the original `PicoStation_MH_V3.uf2`. All releases are marked
+  pre-release for this reason. The next approach is a patch tool for the user's own original UF2 (known to boot).
 
 ## Deliberate deviations from the original
 
