@@ -48,7 +48,7 @@ changing the menu binary (MIPS) and shipping it through the Manager, not the UF2
    id command, or a PS2 only card that does not answer PS1 commands at all. None of them can be confirmed from the
    binary.
 
-## The fix that was made (Manager 0.5.1)
+## The fixes that were made (Manager 0.5.1 and 0.5.2)
 
 The one limit found that depends on how fast a device answers: the detection routine (menu text address `0x800d480c`)
 waited about 180 microseconds for the ACK after each byte (budget 0x78), while the frame read and write routines wait
@@ -58,6 +58,12 @@ were rebuilt (`tools/patch_menu.py` in the Manager repository). Fast devices are
 original and the patched menu in an emulator against a modelled card: a card whose first ACK takes 150 us to 1 ms is found
 only by the patched menu, a normal card is found by both, and frame read and write stay correct. This is still a hypothesis fix:
 it was not tested on any device, and it cannot be ruled out that the real problem is elsewhere.
+
+Manager 0.5.2 adds a second fix found with the same simulator (`--sweep`, device profiles): the menu sends the first byte
+only 0x96 (detection), 0x64 (frame read) or 0x50 (frame write) units, about 1 microsecond each, after selecting the card.
+A device that is not listening yet loses the byte: modelled, a device that needs 200 microseconds broke detection, read and
+write, and 100 microseconds already broke writes. The three settle delays are now 1000 units (about 1 ms); they are minimum
+waits, so they only cost about 0.9 ms per operation. A device that needs more than about 1 ms still fails.
 
 ## What is needed to go further
 
