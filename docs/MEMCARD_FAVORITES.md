@@ -65,6 +65,24 @@ A device that is not listening yet loses the byte: modelled, a device that needs
 write, and 100 microseconds already broke writes. The three settle delays are now 1000 units (about 1 ms); they are minimum
 waits, so they only cost about 0.9 ms per operation. A device that needs more than about 1 ms still fails.
 
+## What the protocol documentation says (checked against the fixes)
+
+From the PSX protocol notes (https://kraptor.github.io/psx-docs/controllersandmemorycards, after Martin Korth's NO$PSX docs):
+
+* A device must pull /ACK low within **100 microseconds** of the last clock pulse (the kernel times out after that) and
+  should not reply before it has seen the address byte `81h`. A device that follows the protocol therefore already passed
+  the original 180 microsecond detection budget; **the two fixes only help devices that are slower than the protocol allows**.
+* Original Sony cards add a pause of about 31000 CPU cycles (about 0.9 ms) before the /ACK that follows the 7th byte of a read.
+  The frame routines wait up to 2.4 ms for each ACK, so they already tolerate that; the detection routine now does too.
+* The FLAG byte starts as `08h` ("directory not read") and is cleared by a write; the menu ignores it, which is harmless.
+* PS2 cards do not fit a PSX slot and have a different directory structure, which matches the finding that the menu only
+  speaks the PS1 frame protocol.
+
+Decision taken under these assumptions: the device behind "ps2memcard" is a PS1-protocol emulator or adapter that is not
+fully protocol conformant in its timing; the timing fixes stay, and nothing else in the frame protocol is changed because
+the menu already matches the documented sequences byte for byte (the simulator runs its real read and write routines
+against a card built from this specification).
+
 ## What is needed to go further
 
 * Which device, which port, and which message the menu shows (`Nenhum Memory Card foi encontrado`, read error, write
