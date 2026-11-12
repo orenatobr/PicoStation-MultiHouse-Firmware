@@ -13,6 +13,7 @@
 #include "mh/handler.h"
 #include "mh/hooks.h"
 #include "mh/hooks_hw.h"
+#include "mh/menu_overlay.h"
 
 namespace mh::hooks {
 namespace {
@@ -182,6 +183,12 @@ void __time_critical_func(card_read_sector)(picostation::DiscImage& disc, void* 
     if (card::sd().read == nullptr || card::sd().read(block, 5, blk) != 0) {
         g_hw->build_sector(disc, sector, out, nullptr, scrambling);  // unreadable: header only, no data
         return;
+    }
+    // Menu program sectors: swap the ones the Manager 0.5.5 patch changes when the card still has the originals.
+    const card::CardState& cs = card::state();
+    if (cs.magic == card::kStateMagic && cs.phase == card::kPhaseMenu && card::globals().raw_base == cs.menu_lba &&
+        lba >= card::kFirstDataLba && lba - card::kFirstDataLba < cs.menu_sectors) {
+        menu_overlay::apply(lba - card::kFirstDataLba, blk);
     }
     // Scramble only data sectors: sync 00 FF*10 00 and a mode byte of 1 or 2.
     bool data = blk[0] == 0 && blk[11] == 0 && (blk[15] == 1 || blk[15] == 2);
