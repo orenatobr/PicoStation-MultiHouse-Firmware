@@ -1,8 +1,9 @@
 # Favorites and the Memory Card (analysis of the PS1 menu)
 
-Status: analysis only. **Nothing in the firmware or in this repository stores favorites**, and no change was made
-for "devices other than original Memory Cards". This document records what the menu does, so the real cause can be
-found with a device in hand.
+Status: **Nothing in the firmware or in this repository stores favorites.** One compatibility fix was made in the
+menu program itself and ships with Manager 0.5.1 (see "The fix that was made"); the real cause of a failure with a
+specific device is still unconfirmed. This document records what the menu does, so the cause can be found with a
+device in hand.
 
 ## Where the code lives
 
@@ -47,11 +48,21 @@ changing the menu binary (MIPS) and shipping it through the Manager, not the UF2
    id command, or a PS2 only card that does not answer PS1 commands at all. None of them can be confirmed from the
    binary.
 
+## The fix that was made (Manager 0.5.1)
+
+The one limit found that depends on how fast a device answers: the detection routine (menu text address `0x800d480c`)
+waited about 180 microseconds for the ACK after each byte (budget 0x78), while the frame read and write routines wait
+about 3 ms (2000). A device that acknowledges slower than 180 us passed the transfers but was reported as "no Memory
+Card found". `addiu $a0, $zero, 0x78` at `0x800d48b4` and `0x800d48fc` became `0x7d0`; EDC and ECC of that raw sector
+were rebuilt (`tools/patch_menu.py` in the Manager repository). Fast devices are unaffected. This is a hypothesis fix:
+it was not tested on any device, and it cannot be ruled out that the real problem is elsewhere.
+
 ## What is needed to go further
 
 * Which device, which port, and which message the menu shows (`Nenhum Memory Card foi encontrado`, read error, write
   error, `sem espaco livre`) or whether favorites silently do not persist.
 * Ideally a logic analyzer capture of one `81 52` read from the device.
 
-No speculative patch of the menu was made: a blind change of the SIO routines would affect every user of original
-cards and cannot be tested here.
+Only the bounded wait above was changed: two constants that can only make the detection more patient. The frame
+protocol, the file layout and the write path were left alone because a blind change there would affect every user of
+original cards and cannot be tested here.
