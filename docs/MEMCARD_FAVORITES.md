@@ -83,6 +83,32 @@ fully protocol conformant in its timing; the timing fixes stay, and nothing else
 the menu already matches the documented sequences byte for byte (the simulator runs its real read and write routines
 against a card built from this specification).
 
+## The device behind "ps2memcard" (BitFunx PSxMemCard Gen2) and the most likely cause
+
+The device the issue was reported with is the BitFunx PSxMemCard Gen2 (https://www.bitfunxshop.com/products/bitfunx-psxmemcard-gen2-for-ps1-psone-and-ps2-games-memory-cards).
+It is an SD2PSX based emulator (same family as the MemCard PRO): it presents virtual cards stored on a microSD card, 128 KB
+cards for the PS1 and larger ones in PS2 mode; the name "PS2 memory card" comes from its PS2 mode, not from the protocol the
+menu speaks. It is protocol conformant, so the timing fixes of Manager 0.5.1 to 0.5.3 are unlikely to be what matters for it.
+
+What matters is the **Game ID**. This family switches to a different virtual card when it receives a Game ID
+(`81 21 00 len+1 id... 00`), which the menu sends when it launches a game (the commands `81 53` and `81 20`, answered with
+`27 FF`, detect the family first). These devices do not ACK the Game ID bytes, which is why the menu sends them without
+waiting. The menu never sends an id for itself, so the card stays on the channel of the last game that was started (or
+the channel selected on the device), and the settings and favorites file `BASCES_31337PICO_CFG` is saved to and loaded
+from that channel. After a different game has been played the next menu session reads another virtual card and the
+favorites seem to be gone; with an original card there is only one card, so it always works.
+This is a hypothesis from the protocol and from the device documentation, not a verified fact.
+
+Workarounds that need no change in the menu:
+
+* Turn off the Game ID based card switching for PS1 in the device settings (SD2PSX / sd2psXtd: Game ID off), or use a
+  fixed channel for the console, so that the device behaves like one card. Favorites then persist.
+* Or keep the favorites on a channel that the device selects for the menu (for sd2psXtd the BootCard mechanism).
+
+A change in the menu (sending its own Game ID, `SCES_313.37`, before reading or saving the file, and waiting for the
+device's channel switch) was considered and not made: it cannot be tested without the device, it adds new machine code to
+the menu for every user, and it would move existing favorites to a new virtual card.
+
 ## What is needed to go further
 
 * Which device, which port, and which message the menu shows (`Nenhum Memory Card foi encontrado`, read error, write
