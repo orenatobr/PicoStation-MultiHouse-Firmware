@@ -43,6 +43,24 @@ static void test_synthetic() {
     CHECK(s == changed);
 }
 
+// Fixture: FNV-1a of the patched sectors the Manager 0.5.5 menu patch produces. The Manager pins the same values in
+// core/tests/test_menu.c, so the two code paths cannot drift apart without a CI failure on one side.
+static const struct { uint32_t sector; uint32_t patched_hash; } kFixture[] = {
+    {33, 0x6c896883u},
+    {34, 0x8bf3870bu},
+    {35, 0x4ccc5389u},
+    {42, 0x366974d3u},
+    {54, 0x769e36ddu},
+};
+
+static void test_fixture() {
+    CHECK_EQ(kCount, sizeof kFixture / sizeof kFixture[0]);
+    for (uint32_t i = 0; i < kCount; ++i) {
+        CHECK_EQ(kEntries[i].sector, kFixture[i].sector);
+        CHECK_EQ(fnv1a(kEntries[i].patched, kSectorBytes), kFixture[i].patched_hash);
+    }
+}
+
 static void test_generated() {
     CHECK_EQ(kCount, 5u);
     Bytes junk(kSectorBytes, 0x11);
@@ -70,6 +88,7 @@ static void test_generated() {
 
 int main() {
     test_synthetic();
+    test_fixture();
     test_generated();
     TEST_MAIN_END();
 }
