@@ -564,7 +564,7 @@ void library_listing() {
                 if (!disc_long(ci.ids[slot], &di, title, "", unused) || di.case_index != ci.index || di.slot != slot) continue;
                 char name[kListNameCap + 1];
                 disc_entry_name(name, title[0] ? title : "JOGO PS1", ci.disc_count != 1, slot + 1);
-                if (!listing_append(&pos, name, 1)) {
+                if (!listing_append(&pos, name, 0)) {   // the original passes flag 0 for Disc rows (FUN_100222e0 at 0x100224b8)
                     err = 1;
                     break;
                 }

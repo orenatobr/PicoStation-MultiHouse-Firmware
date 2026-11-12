@@ -908,13 +908,14 @@ uint32_t listing_digest() {
 }
 
 void test_legacy_listing_unchanged() {
-    // Golden values were taken with the firmware before the extension: cards without it list byte for byte as before.
+    // Golden values are the listing buffers of the ORIGINAL V3 code (run in Unicorn with tools/verify_patch_emu.py's
+    // harness) over the same views: cards without the extension list byte for byte like the original, flags included.
     use(make_image("basic"));
     CHECK(mount_ok());
-    CHECK_EQ(listing_digest(), 0x884a5e1fu);
+    CHECK_EQ(listing_digest(), 0xa36aa1f3u);
     use(make_image("many"));
     CHECK(mount_ok());
-    CHECK_EQ(listing_digest(), 0x3eb531bcu);
+    CHECK_EQ(listing_digest(), 0x7154c535u);
 }
 
 std::string entry_at(uint32_t n) {
