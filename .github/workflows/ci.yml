@@ -28,6 +28,12 @@ jobs:
       - name: Host tests
         run: |
           if ls tests/test_*.cpp >/dev/null 2>&1; then make -C tests; fi
+      - name: Patch tool tests and embedded cave check
+        run: |
+          python3 -I tests/patch_original_test.py
+          cp tools/patch_original.py "$RUNNER_TEMP/before.py"
+          python3 -I tools/patch_original.py --embed
+          diff "$RUNNER_TEMP/before.py" tools/patch_original.py
       - name: Build firmware
         env:
           PICO_SDK_PATH: ${{ runner.temp }}/pico-sdk
