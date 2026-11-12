@@ -52,9 +52,11 @@ changing the menu binary (MIPS) and shipping it through the Manager, not the UF2
 
 The one limit found that depends on how fast a device answers: the detection routine (menu text address `0x800d480c`)
 waited about 180 microseconds for the ACK after each byte (budget 0x78), while the frame read and write routines wait
-about 3 ms (2000). A device that acknowledges slower than 180 us passed the transfers but was reported as "no Memory
+about 2.4 ms (2000). A device that acknowledges slower than 180 us passed the transfers but was reported as "no Memory
 Card found". `addiu $a0, $zero, 0x78` at `0x800d48b4` and `0x800d48fc` became `0x7d0`; EDC and ECC of that raw sector
-were rebuilt (`tools/patch_menu.py` in the Manager repository). Fast devices are unaffected. This is a hypothesis fix:
+were rebuilt (`tools/patch_menu.py` in the Manager repository). Fast devices are unaffected. The Manager repository has `tools/sim_menu_memcard.py`, which runs the real MIPS code of the
+original and the patched menu in an emulator against a modelled card: a card whose first ACK takes 150 us to 1 ms is found
+only by the patched menu, a normal card is found by both, and frame read and write stay correct. This is still a hypothesis fix:
 it was not tested on any device, and it cannot be ruled out that the real problem is elsewhere.
 
 ## What is needed to go further
