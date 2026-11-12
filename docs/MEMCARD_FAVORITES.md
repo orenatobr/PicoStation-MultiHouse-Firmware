@@ -105,9 +105,15 @@ Workarounds that need no change in the menu:
   fixed channel for the console, so that the device behaves like one card. Favorites then persist.
 * Or keep the favorites on a channel that the device selects for the menu (for sd2psXtd the BootCard mechanism).
 
-A change in the menu (sending its own Game ID, `SCES_313.37`, before reading or saving the file, and waiting for the
-device's channel switch) was considered and not made: it cannot be tested without the device, it adds new machine code to
-the menu for every user, and it would move existing favorites to a new virtual card.
+**Update (Manager 0.5.4): the menu change was made.** The embedded menu now sends its own Game ID (`SCES-31337`, from its
+boot file `SCES_313.37`) to every slot that answers `81 20` with `27 FF`, before the first card detection of the save and load
+state machine, waits about 0.8 s for the device to switch card and continues into the original detection. A 564 byte routine
+replaces an unreferenced CD-ROM helper of the menu (`0x800d42e8`) and one `jal` (`0x800d8db0`) is redirected to it; the code is
+`tools/menu_gameid_asm.py` in the Manager repository. It was validated by running the real menu code against a model of
+the device family in an emulator (virtual card per id, reconnect window, no ACK for the id): without the routine the device
+stays on the last game's card and the favorites are not read, with it the device ends on `SCES-31337` and the favorites are read;
+an original card receives no id. Settings saved earlier on a game's card must be saved once again. Not verified on the
+BitFunx itself, and how it treats an id it has never seen is unknown. The firmware UF2 is unchanged by this.
 
 ## What is needed to go further
 
