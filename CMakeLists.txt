@@ -138,6 +138,7 @@ target_link_libraries(
     pico_bootrom
     pico_multicore
     pico_stdlib
+    pico_unique_id
 )
 
 target_include_directories(SD-fatfs BEFORE INTERFACE
