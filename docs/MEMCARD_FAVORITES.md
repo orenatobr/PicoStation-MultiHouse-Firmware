@@ -145,3 +145,12 @@ Memory Card code.
 Only the bounded wait above was changed: two constants that can only make the detection more patient. The frame
 protocol, the file layout and the write path were left alone because a blind change there would affect every user of
 original cards and cannot be tested here.
+
+## Provenance of the patched menu sectors
+
+The five menu sectors that the firmware overlays (33, 34, 35, 42 and 54 of the 93 sector menu) are generated, not hand written:
+
+* The routine itself is built by `tools/menu_gameid_asm.py` and applied to the menu blob by `tools/patch_menu.py` in the Manager repository,
+  <https://github.com/orenatobr/PicoStation-MultiHouse-macOS> (tests in `core/tests/test_menu.c`, device model in `tools/sim_menu_memcard.py`).
+* `tools/gen_menu_overlay.py` in this repository turns the original and the patched menu blobs into `src/mh/menu_overlay_data.cpp`.
+* Both repositories pin the same FNV-1a hashes of the five patched sectors (`tests/test_menu_overlay.cpp` here, `core/tests/test_menu.c` there), so the two code paths cannot drift apart without a CI failure.
