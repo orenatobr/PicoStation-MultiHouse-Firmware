@@ -42,3 +42,13 @@ embedded copy is stale.
 Not checked: a console. Names are longer than the original ever showed, the menu code on the PS1 stores up to 255
 characters per row (`docs/LONG_NAMES.md`), and the original uses flag 0 for Disc rows where the rebuild uses 1 (the
 patch keeps the original's value).
+
+## Decision: no patched UF2 is published
+
+A patched UF2 contains the flash contents of the original `PicoStation_MH_V3.uf2`, which this project does not own, so releases carry the tool and never the image. This is a decision, not an open item.
+
+An opt-in alternative exists for anyone who accepts uploading their own original to their own fork: store the file base64 encoded in a repository secret (for example `V3_ORIGINAL_UF2_B64`), add a workflow that decodes it, runs `python3 tools/patch_original.py original.uf2 patched.uf2` and uploads `patched.uf2` as a private workflow artifact (never as a release asset of a public repository). It is not enabled here because it would put the original into a CI service for no gain over running the tool locally, which takes a few seconds.
+
+## Status
+
+Not run on a console yet. Hardware test plan: flash the plain original and check that the PS1 reaches the menu (baseline); flash the patched image; add a game whose name is longer than 31 characters and has parentheses; check the full name in the library and the disc list.
